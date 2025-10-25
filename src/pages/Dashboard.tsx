@@ -6,6 +6,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter }
 import { Badge } from '@/components/ui/badge';
 import { toast } from 'sonner';
 import { Rocket, Github, LogOut, History, AlertCircle } from 'lucide-react';
+import { ThemeToggle } from '@/components/ThemeToggle';
 import {
   Dialog,
   DialogContent,
@@ -135,10 +136,13 @@ export default function Dashboard() {
               <History className="h-4 w-4 mr-2" />
               History
             </Button>
+          <div className="flex items-center gap-2">
+            <ThemeToggle />
             <Button variant="outline" onClick={signOut}>
               <LogOut className="h-4 w-4 mr-2" />
               Sign Out
             </Button>
+          </div>
           </div>
         </div>
       </header>

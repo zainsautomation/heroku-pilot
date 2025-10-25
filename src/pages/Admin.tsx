@@ -7,7 +7,8 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { toast } from 'sonner';
-import { Rocket, LogOut, Plus, Users, Package, Settings, BarChart } from 'lucide-react';
+import { Rocket, LogOut, Plus, Users, Package, Settings, BarChart, Key } from 'lucide-react';
+import { ThemeToggle } from '@/components/ThemeToggle';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Badge } from '@/components/ui/badge';
@@ -70,6 +71,8 @@ export default function Admin() {
   
   const [selectedUser, setSelectedUser] = useState<UserData | null>(null);
   const [newLimit, setNewLimit] = useState('');
+  const [herokuApiKey, setHerokuApiKey] = useState('');
+  const [showHerokuKey, setShowHerokuKey] = useState(false);
 
   useEffect(() => {
     fetchData();
@@ -77,15 +80,17 @@ export default function Admin() {
 
   const fetchData = async () => {
     try {
-      const [usersRes, templatesRes, deploymentsRes, settingsRes] = await Promise.all([
+      const [usersRes, templatesRes, deploymentsRes, settingsRes, herokuKeyRes] = await Promise.all([
         fetchUsers(),
         supabase.from('app_templates').select('*').order('created_at', { ascending: false }),
         fetchDeployments(),
         supabase.from('system_settings').select('*').eq('setting_key', 'limit_reached_message').maybeSingle(),
+        supabase.from('system_settings').select('*').eq('setting_key', 'heroku_api_key').maybeSingle(),
       ]);
 
       if (templatesRes.data) setTemplates(templatesRes.data);
       if (settingsRes.data) setSystemMessage(settingsRes.data.setting_value);
+      if (herokuKeyRes.data) setHerokuApiKey(herokuKeyRes.data.setting_value);
     } catch (error) {
       console.error('Error fetching data:', error);
       toast.error('Failed to load admin data');
@@ -200,12 +205,35 @@ export default function Admin() {
     try {
       const { error } = await supabase
         .from('system_settings')
-        .update({ setting_value: systemMessage })
-        .eq('setting_key', 'limit_reached_message');
+        .upsert({ 
+          setting_key: 'limit_reached_message',
+          setting_value: systemMessage 
+        }, {
+          onConflict: 'setting_key'
+        });
 
       if (error) throw error;
 
       toast.success('System message updated');
+    } catch (error: any) {
+      toast.error(error.message);
+    }
+  };
+
+  const handleUpdateHerokuKey = async () => {
+    try {
+      const { error } = await supabase
+        .from('system_settings')
+        .upsert({ 
+          setting_key: 'heroku_api_key',
+          setting_value: herokuApiKey 
+        }, {
+          onConflict: 'setting_key'
+        });
+
+      if (error) throw error;
+
+      toast.success('Heroku API key updated');
     } catch (error: any) {
       toast.error(error.message);
     }
@@ -274,10 +302,13 @@ export default function Admin() {
             </div>
           </div>
           
-          <Button variant="outline" onClick={signOut}>
-            <LogOut className="h-4 w-4 mr-2" />
-            Sign Out
-          </Button>
+          <div className="flex items-center gap-2">
+            <ThemeToggle />
+            <Button variant="outline" onClick={signOut}>
+              <LogOut className="h-4 w-4 mr-2" />
+              Sign Out
+            </Button>
+          </div>
         </div>
       </header>
 
@@ -502,26 +533,72 @@ export default function Admin() {
           </TabsContent>
 
           <TabsContent value="settings">
-            <Card className="shadow-elevated">
-              <CardHeader>
-                <CardTitle>System Settings</CardTitle>
-                <CardDescription>Configure system-wide messages</CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                <div className="space-y-2">
-                  <Label>Deployment Limit Reached Message</Label>
-                  <Textarea
-                    value={systemMessage}
-                    onChange={(e) => setSystemMessage(e.target.value)}
-                    placeholder="Message shown when users reach their limit"
-                  />
-                </div>
-                
-                <Button onClick={handleUpdateSystemMessage}>
-                  Save Settings
-                </Button>
-              </CardContent>
-            </Card>
+            <div className="space-y-6">
+              <Card className="shadow-elevated">
+                <CardHeader>
+                  <CardTitle>System Messages</CardTitle>
+                  <CardDescription>Configure system-wide messages</CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  <div className="space-y-2">
+                    <Label>Deployment Limit Reached Message</Label>
+                    <Textarea
+                      value={systemMessage}
+                      onChange={(e) => setSystemMessage(e.target.value)}
+                      placeholder="Message shown when users reach their limit"
+                      rows={3}
+                    />
+                  </div>
+                  
+                  <Button onClick={handleUpdateSystemMessage}>
+                    Save Message
+                  </Button>
+                </CardContent>
+              </Card>
+
+              {role === 'admin' && (
+                <Card className="shadow-elevated">
+                  <CardHeader>
+                    <CardTitle>
+                      <div className="flex items-center gap-2">
+                        <Key className="h-5 w-5" />
+                        Heroku API Configuration
+                      </div>
+                    </CardTitle>
+                    <CardDescription>
+                      Set the Heroku API key to enable app deployments
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent className="space-y-4">
+                    <div className="space-y-2">
+                      <Label>Heroku API Key</Label>
+                      <div className="flex gap-2">
+                        <Input
+                          type={showHerokuKey ? "text" : "password"}
+                          value={herokuApiKey}
+                          onChange={(e) => setHerokuApiKey(e.target.value)}
+                          placeholder="Enter Heroku API key"
+                        />
+                        <Button
+                          variant="outline"
+                          size="icon"
+                          onClick={() => setShowHerokuKey(!showHerokuKey)}
+                        >
+                          {showHerokuKey ? '🙈' : '👁️'}
+                        </Button>
+                      </div>
+                      <p className="text-sm text-muted-foreground">
+                        This key will be used to deploy apps via Heroku API
+                      </p>
+                    </div>
+                    
+                    <Button onClick={handleUpdateHerokuKey}>
+                      Save API Key
+                    </Button>
+                  </CardContent>
+                </Card>
+              )}
+            </div>
           </TabsContent>
         </Tabs>
       </main>
