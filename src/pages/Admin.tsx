@@ -67,6 +67,7 @@ export default function Admin() {
     name: '',
     description: '',
     github_repo_url: '',
+    config_vars: [] as string[],
   });
   
   const [selectedUser, setSelectedUser] = useState<UserData | null>(null);
@@ -174,7 +175,7 @@ export default function Admin() {
       if (error) throw error;
 
       toast.success('Template added successfully');
-      setNewTemplate({ name: '', description: '', github_repo_url: '' });
+      setNewTemplate({ name: '', description: '', github_repo_url: '', config_vars: [] });
       fetchData();
     } catch (error: any) {
       toast.error(error.message);
@@ -436,6 +437,22 @@ export default function Admin() {
                       }
                       placeholder="https://github.com/user/repo"
                     />
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label>Environment Variables (one per line)</Label>
+                    <Textarea
+                      placeholder="DATABASE_URL&#x0a;API_KEY&#x0a;SECRET_TOKEN"
+                      value={newTemplate.config_vars.join('\n')}
+                      onChange={(e) => setNewTemplate({
+                        ...newTemplate,
+                        config_vars: e.target.value.split('\n').filter(v => v.trim())
+                      })}
+                      rows={5}
+                    />
+                    <p className="text-xs text-muted-foreground">
+                      Users will be prompted to provide values for these variables during deployment
+                    </p>
                   </div>
                   
                   <Button onClick={handleAddTemplate} className="w-full">

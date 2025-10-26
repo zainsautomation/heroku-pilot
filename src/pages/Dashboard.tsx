@@ -4,6 +4,8 @@ import { supabase } from '@/integrations/supabase/client';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
 import { toast } from 'sonner';
 import { Rocket, Github, LogOut, History, AlertCircle, Trash2, ExternalLink } from 'lucide-react';
 import { ThemeToggle } from '@/components/ThemeToggle';
@@ -23,6 +25,7 @@ interface AppTemplate {
   description: string;
   github_repo_url: string;
   heroku_deploy_url: string;
+  config_vars: string[] | null;
 }
 
 interface Deployment {
@@ -65,7 +68,12 @@ export default function Dashboard() {
         supabase.from('system_settings').select('*').eq('setting_key', 'limit_reached_message').maybeSingle(),
       ]);
 
-      if (templatesRes.data) setTemplates(templatesRes.data);
+      if (templatesRes.data) {
+        setTemplates(templatesRes.data.map(t => ({
+          ...t,
+          config_vars: Array.isArray(t.config_vars) ? t.config_vars.map(v => String(v)) : []
+        })));
+      }
       if (deploymentsRes.data) {
         setDeployments(deploymentsRes.data);
         const used = deploymentsRes.data.filter(d => d.status === 'success').length;
@@ -151,22 +159,8 @@ export default function Dashboard() {
     }
   };
 
-  const addConfigVar = () => {
-    const key = prompt('Enter config variable name:');
-    if (key) {
-      const value = prompt(`Enter value for ${key}:`);
-      if (value !== null) {
-        setConfigVars(prev => ({ ...prev, [key]: value }));
-      }
-    }
-  };
-
-  const removeConfigVar = (key: string) => {
-    setConfigVars(prev => {
-      const newVars = { ...prev };
-      delete newVars[key];
-      return newVars;
-    });
+  const updateConfigVar = (key: string, value: string) => {
+    setConfigVars(prev => ({ ...prev, [key]: value }));
   };
 
   const canDeploy = deploymentLimit.used < deploymentLimit.max;
@@ -260,6 +254,12 @@ export default function Dashboard() {
                       className="w-full"
                       onClick={() => {
                         setSelectedTemplate(template);
+                        // Initialize config vars with empty values
+                        const initialVars: Record<string, string> = {};
+                        template.config_vars?.forEach(varName => {
+                          initialVars[varName] = '';
+                        });
+                        setConfigVars(initialVars);
                         setShowConfigDialog(true);
                       }}
                       disabled={!canDeploy}
@@ -291,34 +291,27 @@ export default function Dashboard() {
           </DialogHeader>
           
           <div className="space-y-4">
-            <div className="flex justify-between items-center">
-              <p className="text-sm text-muted-foreground">Environment Variables</p>
-              <Button variant="outline" size="sm" onClick={addConfigVar}>
-                Add Variable
-              </Button>
-            </div>
-
-            {Object.keys(configVars).length > 0 ? (
-              <div className="space-y-2">
-                {Object.entries(configVars).map(([key, value]) => (
-                  <div key={key} className="flex items-center gap-2 p-2 border rounded">
-                    <div className="flex-1">
-                      <p className="font-medium text-sm">{key}</p>
-                      <p className="text-xs text-muted-foreground truncate">{value}</p>
-                    </div>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => removeConfigVar(key)}
-                    >
-                      <Trash2 className="h-4 w-4 text-destructive" />
-                    </Button>
+            {selectedTemplate?.config_vars && selectedTemplate.config_vars.length > 0 ? (
+              <div className="space-y-3">
+                <p className="text-sm text-muted-foreground">
+                  Configure environment variables for deployment
+                </p>
+                {selectedTemplate.config_vars.map((varName) => (
+                  <div key={varName} className="space-y-2">
+                    <Label htmlFor={varName}>{varName}</Label>
+                    <Input
+                      id={varName}
+                      type="text"
+                      placeholder={`Enter ${varName}`}
+                      value={configVars[varName] || ''}
+                      onChange={(e) => updateConfigVar(varName, e.target.value)}
+                    />
                   </div>
                 ))}
               </div>
             ) : (
               <p className="text-sm text-muted-foreground text-center py-4">
-                No environment variables added. Click "Add Variable" to add one.
+                No environment variables required for this template.
               </p>
             )}
           </div>

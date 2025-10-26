@@ -16,6 +16,7 @@ export type Database = {
     Tables: {
       app_templates: {
         Row: {
+          config_vars: Json | null
           created_at: string
           created_by: string
           description: string
@@ -26,6 +27,7 @@ export type Database = {
           updated_at: string
         }
         Insert: {
+          config_vars?: Json | null
           created_at?: string
           created_by: string
           description: string
@@ -36,6 +38,7 @@ export type Database = {
           updated_at?: string
         }
         Update: {
+          config_vars?: Json | null
           created_at?: string
           created_by?: string
           description?: string
