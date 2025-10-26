@@ -163,7 +163,7 @@ export default function Admin() {
     }
 
     try {
-      const herokuUrl = `https://heroku.com/deploy?template=${newTemplate.github_repo_url}`;
+      const herokuUrl = `https://dashboard.heroku.com/new?template=${newTemplate.github_repo_url}`;
       
       const { error } = await supabase.from('app_templates').insert({
         ...newTemplate,

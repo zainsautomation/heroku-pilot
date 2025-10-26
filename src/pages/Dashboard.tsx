@@ -5,7 +5,7 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { toast } from 'sonner';
-import { Rocket, Github, LogOut, History, AlertCircle } from 'lucide-react';
+import { Rocket, Github, LogOut, History, AlertCircle, Trash2, ExternalLink } from 'lucide-react';
 import { ThemeToggle } from '@/components/ThemeToggle';
 import {
   Dialog,
@@ -85,25 +85,35 @@ export default function Dashboard() {
   const handleDeploy = async () => {
     if (!selectedTemplate) return;
 
-    setDeploying(true);
+    // Open Heroku deployment page in new tab
+    window.open(selectedTemplate.heroku_deploy_url, '_blank');
+    
+    // Track the deployment attempt
     try {
-      const { error: insertError } = await supabase.from('deployments').insert({
+      await supabase.from('deployments').insert({
         user_id: user!.id,
         app_template_id: selectedTemplate.id,
-        status: 'success',
-        heroku_app_url: `https://${selectedTemplate.name.toLowerCase().replace(/\s+/g, '-')}-${Date.now()}.herokuapp.com`,
+        status: 'pending',
       });
-
-      if (insertError) throw insertError;
-
-      toast.success('App deployed successfully!');
+      
+      toast.success('Opened Heroku deployment page. Complete the deployment in the new tab.');
       setSelectedTemplate(null);
       fetchData();
+    } catch (error) {
+      console.error('Error tracking deployment:', error);
+    }
+  };
+
+  const handleDeleteDeployment = async (deploymentId: string) => {
+    try {
+      const { error } = await supabase.from('deployments').delete().eq('id', deploymentId);
+      if (error) throw error;
+      
+      toast.success('Deployment deleted');
+      fetchData();
     } catch (error: any) {
-      console.error('Deployment error:', error);
-      toast.error(error.message || 'Deployment failed');
-    } finally {
-      setDeploying(false);
+      console.error('Error deleting deployment:', error);
+      toast.error(error.message || 'Failed to delete deployment');
     }
   };
 
@@ -223,8 +233,8 @@ export default function Dashboard() {
             <Button variant="outline" onClick={() => setSelectedTemplate(null)}>
               Cancel
             </Button>
-            <Button onClick={handleDeploy} disabled={deploying}>
-              {deploying ? 'Deploying...' : 'Deploy Now'}
+            <Button onClick={handleDeploy}>
+              Open Heroku Deploy
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -245,6 +255,7 @@ export default function Dashboard() {
                   <TableHead>Status</TableHead>
                   <TableHead>URL</TableHead>
                   <TableHead>Date</TableHead>
+                  <TableHead>Actions</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -262,16 +273,25 @@ export default function Dashboard() {
                           href={deployment.heroku_app_url}
                           target="_blank"
                           rel="noopener noreferrer"
-                          className="text-accent hover:underline"
+                          className="text-accent hover:underline flex items-center gap-1"
                         >
-                          View App
+                          View App <ExternalLink className="h-3 w-3" />
                         </a>
                       ) : (
-                        '-'
+                        <span className="text-muted-foreground">Pending</span>
                       )}
                     </TableCell>
                     <TableCell>
                       {new Date(deployment.created_at).toLocaleDateString()}
+                    </TableCell>
+                    <TableCell>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => handleDeleteDeployment(deployment.id)}
+                      >
+                        <Trash2 className="h-4 w-4 text-destructive" />
+                      </Button>
                     </TableCell>
                   </TableRow>
                 ))}
