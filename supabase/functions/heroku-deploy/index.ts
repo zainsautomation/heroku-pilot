@@ -1,0 +1,252 @@
+import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.76.1';
+
+const corsHeaders = {
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+};
+
+interface DeployRequest {
+  templateId: string;
+  configVars: Record<string, string>;
+}
+
+interface DeleteRequest {
+  appName: string;
+}
+
+Deno.serve(async (req) => {
+  // Handle CORS preflight requests
+  if (req.method === 'OPTIONS') {
+    return new Response(null, { headers: corsHeaders });
+  }
+
+  try {
+    const supabaseClient = createClient(
+      Deno.env.get('SUPABASE_URL') ?? '',
+      Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '',
+      {
+        auth: {
+          persistSession: false,
+        },
+      }
+    );
+
+    // Get user from auth header
+    const authHeader = req.headers.get('Authorization');
+    if (!authHeader) {
+      throw new Error('No authorization header');
+    }
+
+    const { data: { user }, error: userError } = await supabaseClient.auth.getUser(
+      authHeader.replace('Bearer ', '')
+    );
+
+    if (userError || !user) {
+      throw new Error('Unauthorized');
+    }
+
+    const url = new URL(req.url);
+    const action = url.searchParams.get('action');
+
+    // Get Heroku API key from system_settings
+    const { data: settingData, error: settingError } = await supabaseClient
+      .from('system_settings')
+      .select('setting_value')
+      .eq('setting_key', 'heroku_api_key')
+      .maybeSingle();
+
+    if (settingError || !settingData) {
+      throw new Error('Heroku API key not configured. Please contact admin.');
+    }
+
+    const herokuApiKey = settingData.setting_value;
+
+    if (action === 'create') {
+      const { templateId, configVars }: DeployRequest = await req.json();
+
+      console.log('Creating Heroku app for template:', templateId);
+
+      // Get template info
+      const { data: template, error: templateError } = await supabaseClient
+        .from('app_templates')
+        .select('*')
+        .eq('id', templateId)
+        .single();
+
+      if (templateError || !template) {
+        throw new Error('Template not found');
+      }
+
+      // Extract GitHub repo from URL
+      const githubUrl = template.github_repo_url;
+      const repoMatch = githubUrl.match(/github\.com\/(.+?)(?:\.git)?$/);
+      if (!repoMatch) {
+        throw new Error('Invalid GitHub repository URL');
+      }
+      const repoPath = repoMatch[1].replace(/\.git$/, '');
+
+      // Create app on Heroku
+      const appName = `app-${Date.now()}`;
+      const createAppResponse = await fetch('https://api.heroku.com/apps', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${herokuApiKey}`,
+          'Accept': 'application/vnd.heroku+json; version=3',
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          name: appName,
+        }),
+      });
+
+      if (!createAppResponse.ok) {
+        const error = await createAppResponse.text();
+        console.error('Heroku app creation failed:', error);
+        throw new Error(`Failed to create Heroku app: ${error}`);
+      }
+
+      const appData = await createAppResponse.json();
+      console.log('Heroku app created:', appData.name);
+
+      // Set config vars
+      if (Object.keys(configVars).length > 0) {
+        const configResponse = await fetch(`https://api.heroku.com/apps/${appData.name}/config-vars`, {
+          method: 'PATCH',
+          headers: {
+            'Authorization': `Bearer ${herokuApiKey}`,
+            'Accept': 'application/vnd.heroku+json; version=3',
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(configVars),
+        });
+
+        if (!configResponse.ok) {
+          console.error('Failed to set config vars');
+        }
+      }
+
+      // Create build from GitHub
+      const buildResponse = await fetch(`https://api.heroku.com/apps/${appData.name}/builds`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${herokuApiKey}`,
+          'Accept': 'application/vnd.heroku+json; version=3',
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          source_blob: {
+            url: `https://github.com/${repoPath}/tarball/main`,
+          },
+        }),
+      });
+
+      if (!buildResponse.ok) {
+        const error = await buildResponse.text();
+        console.error('Heroku build failed:', error);
+        throw new Error(`Failed to start build: ${error}`);
+      }
+
+      const buildData = await buildResponse.json();
+      console.log('Build started:', buildData.id);
+
+      // Create deployment record
+      const { error: deployError } = await supabaseClient
+        .from('deployments')
+        .insert({
+          user_id: user.id,
+          app_template_id: templateId,
+          status: 'pending',
+          heroku_app_url: `https://${appData.name}.herokuapp.com`,
+          heroku_app_name: appData.name,
+        });
+
+      if (deployError) {
+        console.error('Failed to create deployment record:', deployError);
+      }
+
+      return new Response(
+        JSON.stringify({
+          success: true,
+          appName: appData.name,
+          appUrl: `https://${appData.name}.herokuapp.com`,
+          buildId: buildData.id,
+        }),
+        {
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        }
+      );
+    } else if (action === 'delete') {
+      const { appName }: DeleteRequest = await req.json();
+
+      console.log('Deleting Heroku app:', appName);
+
+      // Delete app from Heroku
+      const deleteResponse = await fetch(`https://api.heroku.com/apps/${appName}`, {
+        method: 'DELETE',
+        headers: {
+          'Authorization': `Bearer ${herokuApiKey}`,
+          'Accept': 'application/vnd.heroku+json; version=3',
+        },
+      });
+
+      if (!deleteResponse.ok && deleteResponse.status !== 404) {
+        const error = await deleteResponse.text();
+        console.error('Heroku app deletion failed:', error);
+        throw new Error(`Failed to delete Heroku app: ${error}`);
+      }
+
+      console.log('Heroku app deleted successfully');
+
+      return new Response(
+        JSON.stringify({ success: true }),
+        {
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        }
+      );
+    } else if (action === 'status') {
+      const appName = url.searchParams.get('appName');
+      if (!appName) {
+        throw new Error('App name required');
+      }
+
+      // Get build status
+      const buildsResponse = await fetch(`https://api.heroku.com/apps/${appName}/builds`, {
+        method: 'GET',
+        headers: {
+          'Authorization': `Bearer ${herokuApiKey}`,
+          'Accept': 'application/vnd.heroku+json; version=3',
+          'Range': 'id ..; max=1, order=desc',
+        },
+      });
+
+      if (!buildsResponse.ok) {
+        throw new Error('Failed to get build status');
+      }
+
+      const builds = await buildsResponse.json();
+      const latestBuild = builds[0];
+
+      return new Response(
+        JSON.stringify({
+          status: latestBuild?.status || 'unknown',
+          buildId: latestBuild?.id,
+        }),
+        {
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        }
+      );
+    }
+
+    throw new Error('Invalid action');
+  } catch (error) {
+    console.error('Error:', error);
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+    return new Response(
+      JSON.stringify({ error: errorMessage }),
+      {
+        status: 400,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      }
+    );
+  }
+});

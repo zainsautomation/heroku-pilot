@@ -76,6 +76,7 @@ export type Database = {
           app_template_id: string
           created_at: string
           error_message: string | null
+          heroku_app_name: string | null
           heroku_app_url: string | null
           id: string
           status: string
@@ -85,6 +86,7 @@ export type Database = {
           app_template_id: string
           created_at?: string
           error_message?: string | null
+          heroku_app_name?: string | null
           heroku_app_url?: string | null
           id?: string
           status?: string
@@ -94,6 +96,7 @@ export type Database = {
           app_template_id?: string
           created_at?: string
           error_message?: string | null
+          heroku_app_name?: string | null
           heroku_app_url?: string | null
           id?: string
           status?: string

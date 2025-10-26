@@ -30,6 +30,7 @@ interface Deployment {
   created_at: string;
   status: string;
   heroku_app_url: string | null;
+  heroku_app_name: string | null;
   error_message: string | null;
   app_templates: {
     name: string;
@@ -46,6 +47,8 @@ export default function Dashboard() {
   const [deploying, setDeploying] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
   const [limitMessage, setLimitMessage] = useState('');
+  const [configVars, setConfigVars] = useState<Record<string, string>>({});
+  const [showConfigDialog, setShowConfigDialog] = useState(false);
 
   useEffect(() => {
     if (user) {
@@ -83,29 +86,60 @@ export default function Dashboard() {
   };
 
   const handleDeploy = async () => {
-    if (!selectedTemplate) return;
+    if (!selectedTemplate || deploying) return;
 
-    // Open Heroku deployment page in new tab
-    window.open(selectedTemplate.heroku_deploy_url, '_blank');
-    
-    // Track the deployment attempt
+    setDeploying(true);
     try {
-      await supabase.from('deployments').insert({
-        user_id: user!.id,
-        app_template_id: selectedTemplate.id,
-        status: 'pending',
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) throw new Error('Not authenticated');
+
+      const response = await supabase.functions.invoke('heroku-deploy', {
+        body: {
+          templateId: selectedTemplate.id,
+          configVars,
+        },
+        headers: {
+          Authorization: `Bearer ${session.access_token}`,
+        },
+        method: 'POST',
       });
-      
-      toast.success('Opened Heroku deployment page. Complete the deployment in the new tab.');
+
+      if (response.error) throw response.error;
+
+      toast.success(`Deployment started! App URL: ${response.data.appUrl}`);
       setSelectedTemplate(null);
+      setShowConfigDialog(false);
+      setConfigVars({});
       fetchData();
-    } catch (error) {
-      console.error('Error tracking deployment:', error);
+    } catch (error: any) {
+      console.error('Error deploying app:', error);
+      toast.error(error.message || 'Failed to deploy app');
+    } finally {
+      setDeploying(false);
     }
   };
 
-  const handleDeleteDeployment = async (deploymentId: string) => {
+  const handleDeleteDeployment = async (deploymentId: string, herokuAppName: string | null) => {
     try {
+      // Delete from Heroku if app name exists
+      if (herokuAppName) {
+        const { data: { session } } = await supabase.auth.getSession();
+        if (session) {
+          const response = await supabase.functions.invoke('heroku-deploy?action=delete', {
+            body: { appName: herokuAppName },
+            headers: {
+              Authorization: `Bearer ${session.access_token}`,
+            },
+            method: 'POST',
+          });
+
+          if (response.error) {
+            console.error('Failed to delete from Heroku:', response.error);
+          }
+        }
+      }
+
+      // Delete from database
       const { error } = await supabase.from('deployments').delete().eq('id', deploymentId);
       if (error) throw error;
       
@@ -115,6 +149,24 @@ export default function Dashboard() {
       console.error('Error deleting deployment:', error);
       toast.error(error.message || 'Failed to delete deployment');
     }
+  };
+
+  const addConfigVar = () => {
+    const key = prompt('Enter config variable name:');
+    if (key) {
+      const value = prompt(`Enter value for ${key}:`);
+      if (value !== null) {
+        setConfigVars(prev => ({ ...prev, [key]: value }));
+      }
+    }
+  };
+
+  const removeConfigVar = (key: string) => {
+    setConfigVars(prev => {
+      const newVars = { ...prev };
+      delete newVars[key];
+      return newVars;
+    });
   };
 
   const canDeploy = deploymentLimit.used < deploymentLimit.max;
@@ -206,7 +258,10 @@ export default function Dashboard() {
                   <CardFooter>
                     <Button
                       className="w-full"
-                      onClick={() => setSelectedTemplate(template)}
+                      onClick={() => {
+                        setSelectedTemplate(template);
+                        setShowConfigDialog(true);
+                      }}
                       disabled={!canDeploy}
                     >
                       <Rocket className="h-4 w-4 mr-2" />
@@ -220,21 +275,64 @@ export default function Dashboard() {
         </div>
       </main>
 
-      <Dialog open={!!selectedTemplate} onOpenChange={() => setSelectedTemplate(null)}>
-        <DialogContent>
+      <Dialog open={showConfigDialog} onOpenChange={(open) => {
+        if (!open) {
+          setShowConfigDialog(false);
+          setSelectedTemplate(null);
+          setConfigVars({});
+        }
+      }}>
+        <DialogContent className="max-w-2xl">
           <DialogHeader>
-            <DialogTitle>Confirm Deployment</DialogTitle>
+            <DialogTitle>Configure Deployment</DialogTitle>
             <DialogDescription>
-              Are you sure you want to deploy {selectedTemplate?.name}?
+              Add environment variables for {selectedTemplate?.name}
             </DialogDescription>
           </DialogHeader>
           
+          <div className="space-y-4">
+            <div className="flex justify-between items-center">
+              <p className="text-sm text-muted-foreground">Environment Variables</p>
+              <Button variant="outline" size="sm" onClick={addConfigVar}>
+                Add Variable
+              </Button>
+            </div>
+
+            {Object.keys(configVars).length > 0 ? (
+              <div className="space-y-2">
+                {Object.entries(configVars).map(([key, value]) => (
+                  <div key={key} className="flex items-center gap-2 p-2 border rounded">
+                    <div className="flex-1">
+                      <p className="font-medium text-sm">{key}</p>
+                      <p className="text-xs text-muted-foreground truncate">{value}</p>
+                    </div>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => removeConfigVar(key)}
+                    >
+                      <Trash2 className="h-4 w-4 text-destructive" />
+                    </Button>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <p className="text-sm text-muted-foreground text-center py-4">
+                No environment variables added. Click "Add Variable" to add one.
+              </p>
+            )}
+          </div>
+          
           <DialogFooter>
-            <Button variant="outline" onClick={() => setSelectedTemplate(null)}>
+            <Button variant="outline" onClick={() => {
+              setShowConfigDialog(false);
+              setSelectedTemplate(null);
+              setConfigVars({});
+            }}>
               Cancel
             </Button>
-            <Button onClick={handleDeploy}>
-              Open Heroku Deploy
+            <Button onClick={handleDeploy} disabled={deploying}>
+              {deploying ? 'Deploying...' : 'Deploy App'}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -288,7 +386,7 @@ export default function Dashboard() {
                       <Button
                         variant="ghost"
                         size="sm"
-                        onClick={() => handleDeleteDeployment(deployment.id)}
+                        onClick={() => handleDeleteDeployment(deployment.id, deployment.heroku_app_name || null)}
                       >
                         <Trash2 className="h-4 w-4 text-destructive" />
                       </Button>
