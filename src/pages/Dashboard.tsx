@@ -6,6 +6,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter }
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { ScrollArea } from '@/components/ui/scroll-area';
 import { toast } from 'sonner';
 import { Rocket, Github, LogOut, History, AlertCircle, Trash2, ExternalLink } from 'lucide-react';
 import { ThemeToggle } from '@/components/ThemeToggle';
@@ -290,31 +291,33 @@ export default function Dashboard() {
             </DialogDescription>
           </DialogHeader>
           
-          <div className="space-y-4">
-            {selectedTemplate?.config_vars && selectedTemplate.config_vars.length > 0 ? (
-              <div className="space-y-3">
-                <p className="text-sm text-muted-foreground">
-                  Configure environment variables for deployment
+          <ScrollArea className="max-h-[400px] pr-4">
+            <div className="space-y-4">
+              {selectedTemplate?.config_vars && selectedTemplate.config_vars.length > 0 ? (
+                <div className="space-y-3">
+                  <p className="text-sm text-muted-foreground">
+                    Configure environment variables for deployment
+                  </p>
+                  {selectedTemplate.config_vars.map((varName) => (
+                    <div key={varName} className="space-y-2">
+                      <Label htmlFor={varName}>{varName}</Label>
+                      <Input
+                        id={varName}
+                        type="text"
+                        placeholder={`Enter ${varName}`}
+                        value={configVars[varName] || ''}
+                        onChange={(e) => updateConfigVar(varName, e.target.value)}
+                      />
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <p className="text-sm text-muted-foreground text-center py-4">
+                  No environment variables required for this template.
                 </p>
-                {selectedTemplate.config_vars.map((varName) => (
-                  <div key={varName} className="space-y-2">
-                    <Label htmlFor={varName}>{varName}</Label>
-                    <Input
-                      id={varName}
-                      type="text"
-                      placeholder={`Enter ${varName}`}
-                      value={configVars[varName] || ''}
-                      onChange={(e) => updateConfigVar(varName, e.target.value)}
-                    />
-                  </div>
-                ))}
-              </div>
-            ) : (
-              <p className="text-sm text-muted-foreground text-center py-4">
-                No environment variables required for this template.
-              </p>
-            )}
-          </div>
+              )}
+            </div>
+          </ScrollArea>
           
           <DialogFooter>
             <Button variant="outline" onClick={() => {

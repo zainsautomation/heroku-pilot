@@ -7,7 +7,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { toast } from 'sonner';
-import { Rocket, LogOut, Plus, Users, Package, Settings, BarChart, Key } from 'lucide-react';
+import { Rocket, LogOut, Plus, Users, Package, Settings, BarChart, Key, Download, Check, X, Loader2 } from 'lucide-react';
 import { ThemeToggle } from '@/components/ThemeToggle';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
@@ -74,6 +74,8 @@ export default function Admin() {
   const [newLimit, setNewLimit] = useState('');
   const [herokuApiKey, setHerokuApiKey] = useState('');
   const [showHerokuKey, setShowHerokuKey] = useState(false);
+  const [fetchingConfig, setFetchingConfig] = useState(false);
+  const [detectedVars, setDetectedVars] = useState<string[]>([]);
 
   useEffect(() => {
     fetchData();
@@ -157,6 +159,43 @@ export default function Admin() {
     }
   };
 
+  const handleFetchConfig = async () => {
+    if (!newTemplate.github_repo_url) {
+      toast.error("Please enter a GitHub URL first");
+      return;
+    }
+
+    setFetchingConfig(true);
+    try {
+      const { data, error } = await supabase.functions.invoke('parse-github-config', {
+        body: { repoUrl: newTemplate.github_repo_url }
+      });
+
+      if (error) throw error;
+
+      if (data.error) {
+        toast.error(data.error);
+        if (data.hint) {
+          toast.info(data.hint);
+        }
+      } else {
+        setDetectedVars(data.variables);
+        toast.success(`Found ${data.count} environment variables`);
+      }
+    } catch (error) {
+      console.error('Error fetching config:', error);
+      toast.error("Failed to fetch config from GitHub");
+    } finally {
+      setFetchingConfig(false);
+    }
+  };
+
+  const handleUseDetectedVars = () => {
+    setNewTemplate({ ...newTemplate, config_vars: detectedVars });
+    setDetectedVars([]);
+    toast.success("Config variables imported");
+  };
+
   const handleAddTemplate = async () => {
     if (!newTemplate.name || !newTemplate.description || !newTemplate.github_repo_url) {
       toast.error('All fields are required');
@@ -176,6 +215,7 @@ export default function Admin() {
 
       toast.success('Template added successfully');
       setNewTemplate({ name: '', description: '', github_repo_url: '', config_vars: [] });
+      setDetectedVars([]);
       fetchData();
     } catch (error: any) {
       toast.error(error.message);
@@ -430,14 +470,65 @@ export default function Admin() {
                   
                   <div className="space-y-2">
                     <Label>GitHub Repository URL</Label>
-                    <Input
-                      value={newTemplate.github_repo_url}
-                      onChange={(e) =>
-                        setNewTemplate({ ...newTemplate, github_repo_url: e.target.value })
-                      }
-                      placeholder="https://github.com/user/repo"
-                    />
+                    <div className="flex gap-2">
+                      <Input
+                        value={newTemplate.github_repo_url}
+                        onChange={(e) =>
+                          setNewTemplate({ ...newTemplate, github_repo_url: e.target.value })
+                        }
+                        placeholder="https://github.com/user/repo"
+                      />
+                      <Button
+                        type="button"
+                        variant="outline"
+                        onClick={handleFetchConfig}
+                        disabled={fetchingConfig || !newTemplate.github_repo_url}
+                        title="Auto-fetch environment variables from GitHub config files"
+                      >
+                        {fetchingConfig ? (
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                        ) : (
+                          <Download className="h-4 w-4" />
+                        )}
+                      </Button>
+                    </div>
                   </div>
+                  
+                  {detectedVars.length > 0 && (
+                    <div className="p-4 border rounded-lg bg-muted/50 space-y-3">
+                      <div className="flex items-center justify-between">
+                        <p className="text-sm font-medium">
+                          Found {detectedVars.length} environment variables
+                        </p>
+                        <div className="flex gap-2">
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="outline"
+                            onClick={() => setDetectedVars([])}
+                          >
+                            <X className="h-3 w-3 mr-1" />
+                            Cancel
+                          </Button>
+                          <Button
+                            type="button"
+                            size="sm"
+                            onClick={handleUseDetectedVars}
+                          >
+                            <Check className="h-3 w-3 mr-1" />
+                            Use These
+                          </Button>
+                        </div>
+                      </div>
+                      <div className="flex flex-wrap gap-2">
+                        {detectedVars.map((varName) => (
+                          <Badge key={varName} variant="secondary">
+                            {varName}
+                          </Badge>
+                        ))}
+                      </div>
+                    </div>
+                  )}
 
                   <div className="space-y-2">
                     <Label>Environment Variables (one per line)</Label>
