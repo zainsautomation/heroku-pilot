@@ -20,6 +20,13 @@ import {
 } from '@/components/ui/dialog';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 
+interface ConfigVarMetadata {
+  name: string;
+  description: string;
+  defaultValue: string;
+  required: boolean;
+}
+
 interface AppTemplate {
   id: string;
   name: string;
@@ -27,6 +34,8 @@ interface AppTemplate {
   github_repo_url: string;
   heroku_deploy_url: string;
   config_vars: string[] | null;
+  config_vars_metadata?: ConfigVarMetadata[] | null;
+  default_app_name?: string | null;
 }
 
 interface Deployment {
@@ -53,6 +62,7 @@ export default function Dashboard() {
   const [limitMessage, setLimitMessage] = useState('');
   const [configVars, setConfigVars] = useState<Record<string, string>>({});
   const [showConfigDialog, setShowConfigDialog] = useState(false);
+  const [appName, setAppName] = useState('');
 
   useEffect(() => {
     if (user) {
@@ -72,7 +82,9 @@ export default function Dashboard() {
       if (templatesRes.data) {
         setTemplates(templatesRes.data.map(t => ({
           ...t,
-          config_vars: Array.isArray(t.config_vars) ? t.config_vars.map(v => String(v)) : []
+          config_vars: Array.isArray(t.config_vars) ? t.config_vars.map(v => String(v)) : [],
+          config_vars_metadata: (t.config_vars_metadata as any) || [],
+          default_app_name: t.default_app_name || null
         })));
       }
       if (deploymentsRes.data) {
@@ -97,6 +109,17 @@ export default function Dashboard() {
   const handleDeploy = async () => {
     if (!selectedTemplate || deploying) return;
 
+    // Validate required fields
+    const metadata = selectedTemplate.config_vars_metadata || [];
+    const missingRequired = metadata.filter(
+      meta => meta.required && !configVars[meta.name]
+    );
+
+    if (missingRequired.length > 0) {
+      toast.error(`Please fill in required fields: ${missingRequired.map(m => m.name).join(', ')}`);
+      return;
+    }
+
     setDeploying(true);
     try {
       const { data: { session } } = await supabase.auth.getSession();
@@ -106,6 +129,7 @@ export default function Dashboard() {
         body: {
           templateId: selectedTemplate.id,
           configVars,
+          appName,
         },
         headers: {
           Authorization: `Bearer ${session.access_token}`,
@@ -115,10 +139,12 @@ export default function Dashboard() {
 
       if (response.error) throw response.error;
 
-      toast.success(`Deployment started! App URL: ${response.data.appUrl}`);
+      toast.success(`Deployment started! App: ${response.data.appName}`);
+      toast.info(`URL: ${response.data.appUrl}`);
       setSelectedTemplate(null);
       setShowConfigDialog(false);
       setConfigVars({});
+      setAppName('');
       fetchData();
     } catch (error: any) {
       console.error('Error deploying app:', error);
@@ -255,12 +281,13 @@ export default function Dashboard() {
                       className="w-full"
                       onClick={() => {
                         setSelectedTemplate(template);
-                        // Initialize config vars with empty values
+                        // Initialize config vars with default values
                         const initialVars: Record<string, string> = {};
-                        template.config_vars?.forEach(varName => {
-                          initialVars[varName] = '';
+                        template.config_vars_metadata?.forEach(varMeta => {
+                          initialVars[varMeta.name] = varMeta.defaultValue || '';
                         });
                         setConfigVars(initialVars);
+                        setAppName('');
                         setShowConfigDialog(true);
                       }}
                       disabled={!canDeploy}
@@ -281,32 +308,59 @@ export default function Dashboard() {
           setShowConfigDialog(false);
           setSelectedTemplate(null);
           setConfigVars({});
+          setAppName('');
         }
       }}>
         <DialogContent className="max-w-2xl">
           <DialogHeader>
             <DialogTitle>Configure Deployment</DialogTitle>
             <DialogDescription>
-              Add environment variables for {selectedTemplate?.name}
+              Configure settings for {selectedTemplate?.name}
             </DialogDescription>
           </DialogHeader>
           
-          <ScrollArea className="max-h-[400px] pr-4">
+          <ScrollArea className="max-h-[60vh] pr-4">
             <div className="space-y-4">
-              {selectedTemplate?.config_vars && selectedTemplate.config_vars.length > 0 ? (
+              <div className="space-y-2">
+                <Label htmlFor="appName">
+                  Heroku App Name <span className="text-muted-foreground">(Optional)</span>
+                </Label>
+                <Input
+                  id="appName"
+                  type="text"
+                  placeholder={`${selectedTemplate?.default_app_name || 'app'}-1234567890`}
+                  value={appName}
+                  onChange={(e) => setAppName(e.target.value)}
+                />
+                <p className="text-xs text-muted-foreground">
+                  Leave empty to auto-generate. A timestamp will be added automatically.
+                </p>
+              </div>
+
+              {selectedTemplate?.config_vars_metadata && selectedTemplate.config_vars_metadata.length > 0 ? (
                 <div className="space-y-3">
-                  <p className="text-sm text-muted-foreground">
-                    Configure environment variables for deployment
-                  </p>
-                  {selectedTemplate.config_vars.map((varName) => (
-                    <div key={varName} className="space-y-2">
-                      <Label htmlFor={varName}>{varName}</Label>
+                  <p className="text-sm font-medium">Environment Variables</p>
+                  {selectedTemplate.config_vars_metadata.map((varMeta) => (
+                    <div key={varMeta.name} className="space-y-2 p-3 border rounded-lg bg-card">
+                      <div className="flex items-center gap-2">
+                        <Label htmlFor={varMeta.name} className="font-mono text-sm">
+                          {varMeta.name}
+                        </Label>
+                        {varMeta.required && (
+                          <Badge variant="destructive" className="text-xs">Required</Badge>
+                        )}
+                      </div>
+                      {varMeta.description && (
+                        <p className="text-xs text-muted-foreground">{varMeta.description}</p>
+                      )}
                       <Input
-                        id={varName}
+                        id={varMeta.name}
                         type="text"
-                        placeholder={`Enter ${varName}`}
-                        value={configVars[varName] || ''}
-                        onChange={(e) => updateConfigVar(varName, e.target.value)}
+                        placeholder={varMeta.defaultValue || `Enter ${varMeta.name}`}
+                        value={configVars[varMeta.name] || ''}
+                        onChange={(e) => updateConfigVar(varMeta.name, e.target.value)}
+                        required={varMeta.required}
+                        className={varMeta.required && !configVars[varMeta.name] ? 'border-destructive' : ''}
                       />
                     </div>
                   ))}
@@ -324,6 +378,7 @@ export default function Dashboard() {
               setShowConfigDialog(false);
               setSelectedTemplate(null);
               setConfigVars({});
+              setAppName('');
             }}>
               Cancel
             </Button>

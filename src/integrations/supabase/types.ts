@@ -17,8 +17,10 @@ export type Database = {
       app_templates: {
         Row: {
           config_vars: Json | null
+          config_vars_metadata: Json | null
           created_at: string
           created_by: string
+          default_app_name: string | null
           description: string
           github_repo_url: string
           heroku_deploy_url: string
@@ -28,8 +30,10 @@ export type Database = {
         }
         Insert: {
           config_vars?: Json | null
+          config_vars_metadata?: Json | null
           created_at?: string
           created_by: string
+          default_app_name?: string | null
           description: string
           github_repo_url: string
           heroku_deploy_url: string
@@ -39,8 +43,10 @@ export type Database = {
         }
         Update: {
           config_vars?: Json | null
+          config_vars_metadata?: Json | null
           created_at?: string
           created_by?: string
+          default_app_name?: string | null
           description?: string
           github_repo_url?: string
           heroku_deploy_url?: string

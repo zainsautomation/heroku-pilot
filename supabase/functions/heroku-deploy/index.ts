@@ -8,6 +8,7 @@ const corsHeaders = {
 interface DeployRequest {
   templateId: string;
   configVars: Record<string, string>;
+  appName?: string;
 }
 
 interface DeleteRequest {
@@ -46,7 +47,7 @@ Deno.serve(async (req) => {
     }
 
     const url = new URL(req.url);
-    const action = url.searchParams.get('action');
+    const action = url.searchParams.get('action') || 'create'; // Default to 'create' if no action
 
     // Get Heroku API key from system_settings
     const { data: settingData, error: settingError } = await supabaseClient
@@ -62,7 +63,7 @@ Deno.serve(async (req) => {
     const herokuApiKey = settingData.setting_value;
 
     if (action === 'create') {
-      const { templateId, configVars }: DeployRequest = await req.json();
+      const { templateId, configVars, appName: customAppName }: DeployRequest = await req.json();
 
       console.log('Creating Heroku app for template:', templateId);
 
@@ -86,7 +87,8 @@ Deno.serve(async (req) => {
       const repoPath = repoMatch[1].replace(/\.git$/, '');
 
       // Create app on Heroku
-      const appName = `app-${Date.now()}`;
+      const baseAppName = customAppName || template.default_app_name || 'app';
+      const appName = `${baseAppName}-${Date.now()}`.toLowerCase().replace(/[^a-z0-9-]/g, '-');
       const createAppResponse = await fetch('https://api.heroku.com/apps', {
         method: 'POST',
         headers: {

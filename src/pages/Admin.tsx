@@ -7,11 +7,12 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { toast } from 'sonner';
-import { Rocket, LogOut, Plus, Users, Package, Settings, BarChart, Key, Download, Check, X, Loader2 } from 'lucide-react';
+import { Rocket, LogOut, Plus, Users, Package, Settings, BarChart, Key, Download, Check, X, Loader2, Trash2 } from 'lucide-react';
 import { ThemeToggle } from '@/components/ThemeToggle';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Badge } from '@/components/ui/badge';
+import { ScrollArea } from '@/components/ui/scroll-area';
 import {
   Dialog,
   DialogContent,
@@ -19,7 +20,6 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
-  DialogTrigger,
 } from '@/components/ui/dialog';
 import {
   Select,
@@ -38,6 +38,13 @@ interface UserData {
   deployment_count: number;
 }
 
+interface ConfigVarMetadata {
+  name: string;
+  description: string;
+  defaultValue: string;
+  required: boolean;
+}
+
 interface AppTemplate {
   id: string;
   name: string;
@@ -45,6 +52,8 @@ interface AppTemplate {
   github_repo_url: string;
   heroku_deploy_url: string;
   created_at: string;
+  config_vars_metadata?: ConfigVarMetadata[];
+  default_app_name?: string;
 }
 
 interface Deployment {
@@ -67,7 +76,8 @@ export default function Admin() {
     name: '',
     description: '',
     github_repo_url: '',
-    config_vars: [] as string[],
+    config_vars_metadata: [] as ConfigVarMetadata[],
+    default_app_name: '',
   });
   
   const [selectedUser, setSelectedUser] = useState<UserData | null>(null);
@@ -75,7 +85,8 @@ export default function Admin() {
   const [herokuApiKey, setHerokuApiKey] = useState('');
   const [showHerokuKey, setShowHerokuKey] = useState(false);
   const [fetchingConfig, setFetchingConfig] = useState(false);
-  const [detectedVars, setDetectedVars] = useState<string[]>([]);
+  const [detectedVars, setDetectedVars] = useState<ConfigVarMetadata[]>([]);
+  const [showVarsDialog, setShowVarsDialog] = useState(false);
 
   useEffect(() => {
     fetchData();
@@ -91,7 +102,12 @@ export default function Admin() {
         supabase.from('system_settings').select('*').eq('setting_key', 'heroku_api_key').maybeSingle(),
       ]);
 
-      if (templatesRes.data) setTemplates(templatesRes.data);
+      if (templatesRes.data) {
+        setTemplates(templatesRes.data.map(t => ({
+          ...t,
+          config_vars_metadata: (t.config_vars_metadata as any) || []
+        })));
+      }
       if (settingsRes.data) setSystemMessage(settingsRes.data.setting_value);
       if (herokuKeyRes.data) setHerokuApiKey(herokuKeyRes.data.setting_value);
     } catch (error) {
@@ -180,6 +196,7 @@ export default function Admin() {
         }
       } else {
         setDetectedVars(data.variables);
+        setShowVarsDialog(true);
         toast.success(`Found ${data.count} environment variables`);
       }
     } catch (error) {
@@ -190,10 +207,13 @@ export default function Admin() {
     }
   };
 
-  const handleUseDetectedVars = () => {
-    setNewTemplate({ ...newTemplate, config_vars: detectedVars });
-    setDetectedVars([]);
-    toast.success("Config variables imported");
+  const handleAcceptVars = () => {
+    setNewTemplate(prev => ({
+      ...prev,
+      config_vars_metadata: detectedVars
+    }));
+    setShowVarsDialog(false);
+    toast.success(`Added ${detectedVars.length} environment variables`);
   };
 
   const handleAddTemplate = async () => {
@@ -206,15 +226,26 @@ export default function Admin() {
       const herokuUrl = `https://dashboard.heroku.com/new?template=${newTemplate.github_repo_url}`;
       
       const { error } = await supabase.from('app_templates').insert({
-        ...newTemplate,
+        name: newTemplate.name,
+        description: newTemplate.description,
+        github_repo_url: newTemplate.github_repo_url,
         heroku_deploy_url: herokuUrl,
+        config_vars: newTemplate.config_vars_metadata.map(v => v.name) as any,
+        config_vars_metadata: newTemplate.config_vars_metadata as any,
+        default_app_name: newTemplate.default_app_name,
         created_by: (await supabase.auth.getUser()).data.user!.id,
       });
 
       if (error) throw error;
 
       toast.success('Template added successfully');
-      setNewTemplate({ name: '', description: '', github_repo_url: '', config_vars: [] });
+      setNewTemplate({ 
+        name: '', 
+        description: '', 
+        github_repo_url: '', 
+        config_vars_metadata: [],
+        default_app_name: '',
+      });
       setDetectedVars([]);
       fetchData();
     } catch (error: any) {
@@ -467,6 +498,20 @@ export default function Admin() {
                       placeholder="A brief description of the app"
                     />
                   </div>
+
+                  <div className="space-y-2">
+                    <Label>Default Heroku App Name (Optional)</Label>
+                    <Input
+                      value={newTemplate.default_app_name}
+                      onChange={(e) =>
+                        setNewTemplate({ ...newTemplate, default_app_name: e.target.value })
+                      }
+                      placeholder="my-app (timestamp will be added)"
+                    />
+                    <p className="text-xs text-muted-foreground">
+                      Optional prefix for Heroku app names. Example: my-app becomes my-app-1234567890
+                    </p>
+                  </div>
                   
                   <div className="space-y-2">
                     <Label>GitHub Repository URL</Label>
@@ -494,56 +539,81 @@ export default function Admin() {
                     </div>
                   </div>
                   
-                  {detectedVars.length > 0 && (
-                    <div className="p-4 border rounded-lg bg-muted/50 space-y-3">
-                      <div className="flex items-center justify-between">
-                        <p className="text-sm font-medium">
-                          Found {detectedVars.length} environment variables
-                        </p>
-                        <div className="flex gap-2">
-                          <Button
-                            type="button"
-                            size="sm"
-                            variant="outline"
-                            onClick={() => setDetectedVars([])}
-                          >
-                            <X className="h-3 w-3 mr-1" />
-                            Cancel
-                          </Button>
-                          <Button
-                            type="button"
-                            size="sm"
-                            onClick={handleUseDetectedVars}
-                          >
-                            <Check className="h-3 w-3 mr-1" />
-                            Use These
-                          </Button>
-                        </div>
-                      </div>
-                      <div className="flex flex-wrap gap-2">
-                        {detectedVars.map((varName) => (
-                          <Badge key={varName} variant="secondary">
-                            {varName}
-                          </Badge>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-
                   <div className="space-y-2">
-                    <Label>Environment Variables (one per line)</Label>
-                    <Textarea
-                      placeholder="DATABASE_URL&#x0a;API_KEY&#x0a;SECRET_TOKEN"
-                      value={newTemplate.config_vars.join('\n')}
-                      onChange={(e) => setNewTemplate({
-                        ...newTemplate,
-                        config_vars: e.target.value.split('\n').filter(v => v.trim())
-                      })}
-                      rows={5}
-                    />
-                    <p className="text-xs text-muted-foreground">
-                      Users will be prompted to provide values for these variables during deployment
-                    </p>
+                    <Label>Environment Variables</Label>
+                    {newTemplate.config_vars_metadata.length > 0 ? (
+                      <ScrollArea className="h-64 border rounded-md p-4">
+                        <div className="space-y-4">
+                          {newTemplate.config_vars_metadata.map((varMeta, idx) => (
+                            <div key={idx} className="p-3 border rounded-lg space-y-2 bg-card">
+                              <div className="flex items-center justify-between">
+                                <div className="flex items-center gap-2">
+                                  <code className="text-sm font-mono bg-muted px-2 py-1 rounded">
+                                    {varMeta.name}
+                                  </code>
+                                  {varMeta.required && (
+                                    <Badge variant="destructive" className="text-xs">Required</Badge>
+                                  )}
+                                </div>
+                                <Button
+                                  type="button"
+                                  variant="ghost"
+                                  size="sm"
+                                  onClick={() => {
+                                    const updated = newTemplate.config_vars_metadata.filter((_, i) => i !== idx);
+                                    setNewTemplate({
+                                      ...newTemplate,
+                                      config_vars_metadata: updated
+                                    });
+                                  }}
+                                >
+                                  <Trash2 className="h-4 w-4" />
+                                </Button>
+                              </div>
+                              <Input
+                                placeholder="Description (what is this for?)"
+                                value={varMeta.description}
+                                onChange={(e) => {
+                                  const updated = [...newTemplate.config_vars_metadata];
+                                  updated[idx] = { ...updated[idx], description: e.target.value };
+                                  setNewTemplate({ ...newTemplate, config_vars_metadata: updated });
+                                }}
+                              />
+                              <Input
+                                placeholder="Default value (optional)"
+                                value={varMeta.defaultValue}
+                                onChange={(e) => {
+                                  const updated = [...newTemplate.config_vars_metadata];
+                                  updated[idx] = { ...updated[idx], defaultValue: e.target.value };
+                                  setNewTemplate({ ...newTemplate, config_vars_metadata: updated });
+                                }}
+                              />
+                              <div className="flex items-center gap-2">
+                                <input
+                                  type="checkbox"
+                                  id={`required-${idx}`}
+                                  checked={varMeta.required}
+                                  onChange={(e) => {
+                                    const updated = [...newTemplate.config_vars_metadata];
+                                    updated[idx] = { ...updated[idx], required: e.target.checked };
+                                    setNewTemplate({ ...newTemplate, config_vars_metadata: updated });
+                                  }}
+                                  className="h-4 w-4"
+                                />
+                                <Label htmlFor={`required-${idx}`} className="text-sm cursor-pointer">
+                                  Required field
+                                </Label>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </ScrollArea>
+                    ) : (
+                      <div className="text-sm text-muted-foreground p-8 border rounded-md text-center">
+                        <p className="mb-2">No environment variables added yet.</p>
+                        <p>Use the <Download className="h-4 w-4 inline" /> button to auto-fetch from GitHub.</p>
+                      </div>
+                    )}
                   </div>
                   
                   <Button onClick={handleAddTemplate} className="w-full">
@@ -735,6 +805,50 @@ export default function Admin() {
               Cancel
             </Button>
             <Button onClick={handleUpdateLimit}>Update</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={showVarsDialog} onOpenChange={setShowVarsDialog}>
+        <DialogContent className="max-w-3xl">
+          <DialogHeader>
+            <DialogTitle>Detected Environment Variables</DialogTitle>
+            <DialogDescription>
+              Found {detectedVars.length} variables from GitHub with defaults and descriptions
+            </DialogDescription>
+          </DialogHeader>
+          
+          <ScrollArea className="max-h-96">
+            <div className="space-y-3">
+              {detectedVars.map((varMeta, idx) => (
+                <div key={idx} className="p-3 border rounded-lg space-y-2 bg-card">
+                  <div className="flex items-center gap-2">
+                    <code className="text-sm font-mono bg-muted px-2 py-1 rounded">{varMeta.name}</code>
+                    {varMeta.required && (
+                      <Badge variant="destructive" className="text-xs">Required</Badge>
+                    )}
+                  </div>
+                  {varMeta.description && (
+                    <p className="text-sm text-muted-foreground">{varMeta.description}</p>
+                  )}
+                  {varMeta.defaultValue && (
+                    <div className="text-xs">
+                      <span className="text-muted-foreground">Default: </span>
+                      <code className="bg-muted px-1 py-0.5 rounded">{varMeta.defaultValue}</code>
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          </ScrollArea>
+          
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowVarsDialog(false)}>
+              Cancel
+            </Button>
+            <Button onClick={handleAcceptVars}>
+              Add All Variables
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

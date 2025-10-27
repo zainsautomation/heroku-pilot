@@ -41,7 +41,14 @@ serve(async (req) => {
       'app.json',
     ];
 
-    let detectedVars: string[] = [];
+    interface ConfigVar {
+      name: string;
+      description: string;
+      defaultValue: string;
+      required: boolean;
+    }
+
+    let detectedVars: ConfigVar[] = [];
     let fileFound = false;
 
     // Try to fetch each config file
@@ -69,39 +76,76 @@ serve(async (req) => {
           const content = atob(data.content);
           console.log(`Successfully fetched ${file}`);
           
-          // Extract environment variables using regex
-          // Matches: process.env.VARIABLE_NAME
-          const envVarPattern = /process\.env\.([A-Z_][A-Z0-9_]*)/g;
-          const matches = content.matchAll(envVarPattern);
-          
-          const vars = new Set<string>();
-          for (const match of matches) {
-            vars.add(match[1]);
-          }
+          const varsMap = new Map<string, ConfigVar>();
 
-          // Also check for .env.example format (KEY=value)
-          if (file.includes('.env')) {
-            const envPattern = /^([A-Z_][A-Z0-9_]*)\s*=/gm;
-            const envMatches = content.matchAll(envPattern);
-            for (const match of envMatches) {
-              vars.add(match[1]);
+          // Extract environment variables from JavaScript config files
+          if (file.endsWith('.js')) {
+            // Pattern: VARIABLE_NAME: process.env.VARIABLE_NAME || "default",
+            const jsPattern = /([A-Z_][A-Z0-9_]*)\s*:\s*process\.env\.([A-Z_][A-Z0-9_]*)\s*\|\|\s*["']([^"']*)["']\s*,?\s*(?:\/\/\s*(.*))?/g;
+            let match;
+            
+            while ((match = jsPattern.exec(content)) !== null) {
+              const [, varKey, envVar, defaultVal, comment] = match;
+              varsMap.set(envVar, {
+                name: envVar,
+                description: comment?.trim() || '',
+                defaultValue: defaultVal || '',
+                required: !defaultVal, // If no default, mark as required
+              });
+            }
+
+            // Also check for simple process.env.VARIABLE_NAME patterns
+            const simplePattern = /process\.env\.([A-Z_][A-Z0-9_]*)/g;
+            while ((match = simplePattern.exec(content)) !== null) {
+              const varName = match[1];
+              if (!varsMap.has(varName)) {
+                varsMap.set(varName, {
+                  name: varName,
+                  description: '',
+                  defaultValue: '',
+                  required: false,
+                });
+              }
             }
           }
 
-          // Also check for app.json format (Heroku)
+          // Check for .env.example format (KEY=value)
+          if (file.includes('.env')) {
+            const envPattern = /^([A-Z_][A-Z0-9_]*)\s*=\s*([^\n\r]*?)(?:\s*#\s*(.*))?$/gm;
+            let match;
+            
+            while ((match = envPattern.exec(content)) !== null) {
+              const [, varName, defaultVal, comment] = match;
+              varsMap.set(varName, {
+                name: varName,
+                description: comment?.trim() || '',
+                defaultValue: defaultVal?.trim() || '',
+                required: !defaultVal?.trim(),
+              });
+            }
+          }
+
+          // Check for app.json format (Heroku)
           if (file === 'app.json') {
             try {
               const appJson = JSON.parse(content);
               if (appJson.env) {
-                Object.keys(appJson.env).forEach(key => vars.add(key));
+                Object.entries(appJson.env).forEach(([key, config]: [string, any]) => {
+                  varsMap.set(key, {
+                    name: key,
+                    description: config.description || '',
+                    defaultValue: config.value || '',
+                    required: config.required !== false,
+                  });
+                });
               }
             } catch (e) {
               console.error('Error parsing app.json:', e);
             }
           }
 
-          if (vars.size > 0) {
-            detectedVars = Array.from(vars);
+          if (varsMap.size > 0) {
+            detectedVars = Array.from(varsMap.values());
             fileFound = true;
             console.log(`Found ${detectedVars.length} variables in ${file}`);
             break; // Stop after finding first config file with variables
