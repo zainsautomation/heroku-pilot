@@ -63,12 +63,30 @@ export default function Dashboard() {
   const [configVars, setConfigVars] = useState<Record<string, string>>({});
   const [showConfigDialog, setShowConfigDialog] = useState(false);
   const [appName, setAppName] = useState('');
+  const [pollingDeployments, setPollingDeployments] = useState<Set<string>>(new Set());
 
   useEffect(() => {
     if (user) {
       fetchData();
     }
   }, [user]);
+
+  useEffect(() => {
+    if (deployments.length === 0) return;
+
+    const pendingDeployments = deployments.filter(d => d.status === 'pending');
+    if (pendingDeployments.length === 0) return;
+
+    const pollInterval = setInterval(() => {
+      pendingDeployments.forEach(deployment => {
+        if (deployment.heroku_app_name && !pollingDeployments.has(deployment.id)) {
+          pollBuildStatus(deployment.id, deployment.heroku_app_name);
+        }
+      });
+    }, 5000);
+
+    return () => clearInterval(pollInterval);
+  }, [deployments]);
 
   const fetchData = async () => {
     try {
@@ -103,6 +121,68 @@ export default function Dashboard() {
       toast.error('Failed to load dashboard data');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const pollBuildStatus = async (deploymentId: string, appName: string) => {
+    if (pollingDeployments.has(deploymentId)) return;
+
+    setPollingDeployments(prev => new Set(prev).add(deploymentId));
+
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) return;
+
+      const response = await supabase.functions.invoke(`heroku-deploy?action=status&appName=${appName}`, {
+        headers: {
+          Authorization: `Bearer ${session.access_token}`,
+        },
+      });
+
+      if (response.error) {
+        console.error('Failed to get build status:', response.error);
+        return;
+      }
+
+      const { status } = response.data;
+
+      if (status === 'succeeded') {
+        await supabase
+          .from('deployments')
+          .update({ status: 'success' })
+          .eq('id', deploymentId);
+        
+        toast.success(`Deployment ${appName} completed successfully!`);
+        fetchData();
+        setPollingDeployments(prev => {
+          const next = new Set(prev);
+          next.delete(deploymentId);
+          return next;
+        });
+      } else if (status === 'failed') {
+        await supabase
+          .from('deployments')
+          .update({ 
+            status: 'failed',
+            error_message: 'Build failed on Heroku'
+          })
+          .eq('id', deploymentId);
+        
+        toast.error(`Deployment ${appName} failed!`);
+        fetchData();
+        setPollingDeployments(prev => {
+          const next = new Set(prev);
+          next.delete(deploymentId);
+          return next;
+        });
+      }
+    } catch (error) {
+      console.error('Error polling build status:', error);
+      setPollingDeployments(prev => {
+        const next = new Set(prev);
+        next.delete(deploymentId);
+        return next;
+      });
     }
   };
 
@@ -152,12 +232,13 @@ export default function Dashboard() {
       }
 
       toast.success(`Deployment started! App: ${response.data.appName}`);
-      toast.info(`URL: ${response.data.appUrl}`);
+      toast.info(`Building app... This may take a few minutes.`);
+      toast.info(`URL: ${response.data.appUrl}`, { duration: 10000 });
       setSelectedTemplate(null);
       setShowConfigDialog(false);
       setConfigVars({});
       setAppName('');
-      fetchData();
+      await fetchData();
     } catch (error: any) {
       console.error('Error deploying app:', error);
       toast.error(error.message || 'Failed to deploy app');
@@ -412,7 +493,8 @@ export default function Dashboard() {
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead>App</TableHead>
+                  <TableHead>Template</TableHead>
+                  <TableHead>App Name</TableHead>
                   <TableHead>Status</TableHead>
                   <TableHead>URL</TableHead>
                   <TableHead>Date</TableHead>
@@ -424,9 +506,23 @@ export default function Dashboard() {
                   <TableRow key={deployment.id}>
                     <TableCell>{deployment.app_templates?.name || 'Unknown'}</TableCell>
                     <TableCell>
-                      <Badge variant={deployment.status === 'success' ? 'default' : 'destructive'}>
-                        {deployment.status}
+                      <span className="font-mono text-xs text-muted-foreground">
+                        {deployment.heroku_app_name || 'N/A'}
+                      </span>
+                    </TableCell>
+                    <TableCell>
+                      <Badge 
+                        variant={
+                          deployment.status === 'success' ? 'default' : 
+                          deployment.status === 'pending' ? 'secondary' : 
+                          'destructive'
+                        }
+                      >
+                        {deployment.status === 'pending' && pollingDeployments.has(deployment.id) ? 'Building...' : deployment.status}
                       </Badge>
+                      {deployment.error_message && (
+                        <p className="text-xs text-destructive mt-1">{deployment.error_message}</p>
+                      )}
                     </TableCell>
                     <TableCell>
                       {deployment.heroku_app_url ? (
@@ -439,7 +535,7 @@ export default function Dashboard() {
                           View App <ExternalLink className="h-3 w-3" />
                         </a>
                       ) : (
-                        <span className="text-muted-foreground">Pending</span>
+                        <span className="text-muted-foreground">-</span>
                       )}
                     </TableCell>
                     <TableCell>

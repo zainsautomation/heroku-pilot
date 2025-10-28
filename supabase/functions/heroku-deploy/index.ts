@@ -197,7 +197,7 @@ Deno.serve(async (req) => {
       console.log('Build output stream URL:', buildData.output_stream_url);
 
       // Create deployment record
-      const { error: deployError } = await supabaseClient
+      const { data: deploymentData, error: deployError } = await supabaseClient
         .from('deployments')
         .insert({
           user_id: user.id,
@@ -205,11 +205,16 @@ Deno.serve(async (req) => {
           status: 'pending',
           heroku_app_url: `https://${appData.name}.herokuapp.com`,
           heroku_app_name: appData.name,
-        });
+        })
+        .select()
+        .single();
 
       if (deployError) {
         console.error('Failed to create deployment record:', deployError);
+        throw new Error('Failed to create deployment record');
       }
+
+      console.log('Deployment record created:', deploymentData.id);
 
       return new Response(
         JSON.stringify({
@@ -217,6 +222,7 @@ Deno.serve(async (req) => {
           appName: appData.name,
           appUrl: `https://${appData.name}.herokuapp.com`,
           buildId: buildData.id,
+          deploymentId: deploymentData.id,
         }),
         {
           headers: { ...corsHeaders, 'Content-Type': 'application/json' },
