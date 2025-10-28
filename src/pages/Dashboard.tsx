@@ -137,7 +137,19 @@ export default function Dashboard() {
         method: 'POST',
       });
 
-      if (response.error) throw response.error;
+      // Check for errors in the response
+      if (response.error) {
+        throw new Error(response.error.message || 'Failed to deploy app');
+      }
+
+      // Check if the response data contains an error
+      if (response.data?.error) {
+        throw new Error(response.data.error);
+      }
+
+      if (!response.data?.success) {
+        throw new Error('Deployment failed: No success response received');
+      }
 
       toast.success(`Deployment started! App: ${response.data.appName}`);
       toast.info(`URL: ${response.data.appUrl}`);
