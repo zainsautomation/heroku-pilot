@@ -66,6 +66,8 @@ Deno.serve(async (req) => {
       const { templateId, configVars, appName: customAppName }: DeployRequest = await req.json();
 
       console.log('Creating Heroku app for template:', templateId);
+      console.log('Config vars:', configVars);
+      console.log('Custom app name:', customAppName);
 
       // Get template info
       const { data: template, error: templateError } = await supabaseClient
@@ -75,8 +77,11 @@ Deno.serve(async (req) => {
         .single();
 
       if (templateError || !template) {
+        console.error('Template error:', templateError);
         throw new Error('Template not found');
       }
+
+      console.log('Template found:', template.name);
 
       // Extract GitHub repo from URL
       const githubUrl = template.github_repo_url;
@@ -85,10 +90,14 @@ Deno.serve(async (req) => {
         throw new Error('Invalid GitHub repository URL');
       }
       const repoPath = repoMatch[1].replace(/\.git$/, '');
+      console.log('GitHub repo path:', repoPath);
 
       // Create app on Heroku
       const baseAppName = customAppName || template.default_app_name || 'app';
       const appName = `${baseAppName}-${Date.now()}`.toLowerCase().replace(/[^a-z0-9-]/g, '-');
+      
+      console.log('Creating Heroku app with name:', appName);
+      
       const createAppResponse = await fetch('https://api.heroku.com/apps', {
         method: 'POST',
         headers: {
@@ -102,16 +111,32 @@ Deno.serve(async (req) => {
       });
 
       if (!createAppResponse.ok) {
-        const error = await createAppResponse.text();
-        console.error('Heroku app creation failed:', error);
-        throw new Error(`Failed to create Heroku app: ${error}`);
+        const errorText = await createAppResponse.text();
+        console.error('Heroku app creation failed:', errorText);
+        let errorMessage = 'Failed to create Heroku app';
+        
+        try {
+          const errorJson = JSON.parse(errorText);
+          if (errorJson.message) {
+            errorMessage = errorJson.message;
+          }
+          if (errorJson.id === 'unauthorized') {
+            errorMessage = 'Invalid Heroku API key. Please contact admin to update the API key.';
+          }
+        } catch (e) {
+          errorMessage = errorText;
+        }
+        
+        throw new Error(errorMessage);
       }
 
       const appData = await createAppResponse.json();
       console.log('Heroku app created:', appData.name);
 
       // Set config vars
-      if (Object.keys(configVars).length > 0) {
+      if (configVars && Object.keys(configVars).length > 0) {
+        console.log('Setting config vars:', Object.keys(configVars));
+        
         const configResponse = await fetch(`https://api.heroku.com/apps/${appData.name}/config-vars`, {
           method: 'PATCH',
           headers: {
@@ -123,11 +148,19 @@ Deno.serve(async (req) => {
         });
 
         if (!configResponse.ok) {
-          console.error('Failed to set config vars');
+          const configError = await configResponse.text();
+          console.error('Failed to set config vars:', configError);
+          // Don't throw error, continue with deployment
+        } else {
+          console.log('Config vars set successfully');
         }
+      } else {
+        console.log('No config vars to set');
       }
 
       // Create build from GitHub
+      console.log('Starting build from GitHub...');
+      
       const buildResponse = await fetch(`https://api.heroku.com/apps/${appData.name}/builds`, {
         method: 'POST',
         headers: {
@@ -143,13 +176,25 @@ Deno.serve(async (req) => {
       });
 
       if (!buildResponse.ok) {
-        const error = await buildResponse.text();
-        console.error('Heroku build failed:', error);
-        throw new Error(`Failed to start build: ${error}`);
+        const errorText = await buildResponse.text();
+        console.error('Heroku build failed:', errorText);
+        
+        let errorMessage = 'Failed to start build';
+        try {
+          const errorJson = JSON.parse(errorText);
+          if (errorJson.message) {
+            errorMessage = errorJson.message;
+          }
+        } catch (e) {
+          errorMessage = errorText;
+        }
+        
+        throw new Error(errorMessage);
       }
 
       const buildData = await buildResponse.json();
       console.log('Build started:', buildData.id);
+      console.log('Build output stream URL:', buildData.output_stream_url);
 
       // Create deployment record
       const { error: deployError } = await supabaseClient
