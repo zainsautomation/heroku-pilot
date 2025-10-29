@@ -22,10 +22,10 @@ Deno.serve(async (req) => {
   }
 
   try {
-    // Create Supabase client with service role for database access
-    const supabaseClient = createClient(
+    // Create Supabase client for user authentication
+    const authClient = createClient(
       Deno.env.get('SUPABASE_URL') ?? '',
-      Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '',
+      Deno.env.get('SUPABASE_ANON_KEY') ?? '',
       {
         global: {
           headers: { Authorization: req.headers.get('Authorization')! },
@@ -33,8 +33,14 @@ Deno.serve(async (req) => {
       }
     );
 
+    // Create separate service role client for database access (bypasses RLS)
+    const serviceClient = createClient(
+      Deno.env.get('SUPABASE_URL') ?? '',
+      Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
+    );
+
     // Verify user authentication
-    const { data: { user }, error: userError } = await supabaseClient.auth.getUser();
+    const { data: { user }, error: userError } = await authClient.auth.getUser();
 
     if (userError || !user) {
       console.error('Auth error:', userError);
@@ -47,7 +53,7 @@ Deno.serve(async (req) => {
     const action = url.searchParams.get('action') || 'create'; // Default to 'create' if no action
 
     // Get Heroku API key from system_settings (using service role to bypass RLS)
-    const { data: settingData, error: settingError } = await supabaseClient
+    const { data: settingData, error: settingError } = await serviceClient
       .from('system_settings')
       .select('setting_value')
       .eq('setting_key', 'heroku_api_key')
@@ -79,7 +85,7 @@ Deno.serve(async (req) => {
       console.log('Custom app name:', customAppName);
 
       // Get template info
-      const { data: template, error: templateError } = await supabaseClient
+      const { data: template, error: templateError } = await serviceClient
         .from('app_templates')
         .select('*')
         .eq('id', templateId)
@@ -206,7 +212,7 @@ Deno.serve(async (req) => {
       console.log('Build output stream URL:', buildData.output_stream_url);
 
       // Create deployment record
-      const { data: deploymentData, error: deployError } = await supabaseClient
+      const { data: deploymentData, error: deployError } = await serviceClient
         .from('deployments')
         .insert({
           user_id: user.id,
