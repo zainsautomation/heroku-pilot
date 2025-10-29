@@ -49,18 +49,30 @@ Deno.serve(async (req) => {
     const url = new URL(req.url);
     const action = url.searchParams.get('action') || 'create'; // Default to 'create' if no action
 
-    // Get Heroku API key from system_settings
+    // Get Heroku API key from system_settings (using service role to bypass RLS)
     const { data: settingData, error: settingError } = await supabaseClient
       .from('system_settings')
       .select('setting_value')
       .eq('setting_key', 'heroku_api_key')
       .maybeSingle();
 
-    if (settingError || !settingData) {
+    if (settingError) {
+      console.error('Error fetching Heroku API key:', settingError);
+      throw new Error('Failed to retrieve Heroku API key from database.');
+    }
+
+    if (!settingData || !settingData.setting_value) {
       throw new Error('Heroku API key not configured. Please contact admin.');
     }
 
-    const herokuApiKey = settingData.setting_value;
+    const herokuApiKey = settingData.setting_value.trim();
+    
+    // Validate API key format
+    if (!herokuApiKey || herokuApiKey.length < 20) {
+      throw new Error('Invalid Heroku API key format. Please contact admin to update the API key.');
+    }
+    
+    console.log('Using Heroku API key (first 10 chars):', herokuApiKey.substring(0, 10) + '...');
 
     if (action === 'create') {
       const { templateId, configVars, appName: customAppName }: DeployRequest = await req.json();

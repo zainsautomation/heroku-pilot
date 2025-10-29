@@ -316,18 +316,38 @@ export default function Admin() {
 
   const handleUpdateHerokuKey = async () => {
     try {
+      const trimmedKey = herokuApiKey.trim();
+      
+      // Validate API key format
+      if (!trimmedKey) {
+        toast.error('Please enter a Heroku API key');
+        return;
+      }
+      
+      if (trimmedKey.length < 20) {
+        toast.error('Heroku API key appears to be too short. Please verify it is correct.');
+        return;
+      }
+      
+      // Check for common formatting issues
+      if (trimmedKey.includes(' ') || trimmedKey.includes('\n')) {
+        toast.error('API key contains whitespace. Please check for copy/paste errors.');
+        return;
+      }
+      
       const { error } = await supabase
         .from('system_settings')
         .upsert({ 
           setting_key: 'heroku_api_key',
-          setting_value: herokuApiKey 
+          setting_value: trimmedKey 
         }, {
           onConflict: 'setting_key'
         });
 
       if (error) throw error;
 
-      toast.success('Heroku API key updated');
+      toast.success('Heroku API key updated successfully');
+      setHerokuApiKey(trimmedKey); // Update state with trimmed version
     } catch (error: any) {
       toast.error(error.message);
     }
