@@ -107,6 +107,7 @@ export default function Admin() {
   const [fetchingConfig, setFetchingConfig] = useState(false);
   const [detectedVars, setDetectedVars] = useState<ConfigVarMetadata[]>([]);
   const [showVarsDialog, setShowVarsDialog] = useState(false);
+  const [testingApiKey, setTestingApiKey] = useState(false);
 
   useEffect(() => {
     fetchData();
@@ -311,6 +312,42 @@ export default function Admin() {
       toast.success('System message updated');
     } catch (error: any) {
       toast.error(error.message);
+    }
+  };
+
+  const handleTestHerokuKey = async () => {
+    const trimmedKey = herokuApiKey.trim();
+    
+    if (!trimmedKey) {
+      toast.error('Please enter a Heroku API key first');
+      return;
+    }
+    
+    setTestingApiKey(true);
+    
+    try {
+      // Test the API key by calling Heroku's account info endpoint
+      const response = await fetch('https://api.heroku.com/account', {
+        method: 'GET',
+        headers: {
+          'Authorization': `Bearer ${trimmedKey}`,
+          'Accept': 'application/vnd.heroku+json; version=3',
+        },
+      });
+      
+      if (response.ok) {
+        const accountData = await response.json();
+        toast.success(`✓ API key is valid! Connected to: ${accountData.email}`);
+      } else if (response.status === 401) {
+        toast.error('Invalid API key. Please check and try again.');
+      } else {
+        toast.error(`Connection failed with status: ${response.status}`);
+      }
+    } catch (error: any) {
+      console.error('Test connection error:', error);
+      toast.error('Failed to test connection: ' + error.message);
+    } finally {
+      setTestingApiKey(false);
     }
   };
 
@@ -841,9 +878,33 @@ export default function Admin() {
                       </div>
                     </div>
                     
-                    <Button onClick={handleUpdateHerokuKey} disabled={!herokuApiKey}>
-                      {herokuApiKey ? 'Update' : 'Save'} API Key
-                    </Button>
+                    <div className="flex gap-2">
+                      <Button 
+                        onClick={handleTestHerokuKey} 
+                        disabled={!herokuApiKey || testingApiKey}
+                        variant="outline"
+                        className="flex-1"
+                      >
+                        {testingApiKey ? (
+                          <>
+                            <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                            Testing...
+                          </>
+                        ) : (
+                          <>
+                            <Check className="h-4 w-4 mr-2" />
+                            Test Connection
+                          </>
+                        )}
+                      </Button>
+                      <Button 
+                        onClick={handleUpdateHerokuKey} 
+                        disabled={!herokuApiKey}
+                        className="flex-1"
+                      >
+                        {herokuApiKey ? 'Update' : 'Save'} API Key
+                      </Button>
+                    </div>
                   </CardContent>
                 </Card>
               )}

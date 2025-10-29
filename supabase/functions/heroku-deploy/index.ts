@@ -22,29 +22,26 @@ Deno.serve(async (req) => {
   }
 
   try {
+    // Create Supabase client with service role for database access
     const supabaseClient = createClient(
       Deno.env.get('SUPABASE_URL') ?? '',
       Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '',
       {
-        auth: {
-          persistSession: false,
+        global: {
+          headers: { Authorization: req.headers.get('Authorization')! },
         },
       }
     );
 
-    // Get user from auth header
-    const authHeader = req.headers.get('Authorization');
-    if (!authHeader) {
-      throw new Error('No authorization header');
-    }
-
-    const { data: { user }, error: userError } = await supabaseClient.auth.getUser(
-      authHeader.replace('Bearer ', '')
-    );
+    // Verify user authentication
+    const { data: { user }, error: userError } = await supabaseClient.auth.getUser();
 
     if (userError || !user) {
+      console.error('Auth error:', userError);
       throw new Error('Unauthorized');
     }
+
+    console.log('Authenticated user:', user.id);
 
     const url = new URL(req.url);
     const action = url.searchParams.get('action') || 'create'; // Default to 'create' if no action

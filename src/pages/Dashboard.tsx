@@ -225,16 +225,14 @@ export default function Dashboard() {
       const { data: { session } } = await supabase.auth.getSession();
       if (!session) throw new Error('Not authenticated');
 
+      // Use supabase.functions.invoke without manual Authorization header
+      // The Supabase client handles authentication automatically
       const response = await supabase.functions.invoke('heroku-deploy', {
         body: {
           templateId: selectedTemplate.id,
           configVars,
           appName,
         },
-        headers: {
-          Authorization: `Bearer ${session.access_token}`,
-        },
-        method: 'POST',
       });
 
       // Check for errors in the response
@@ -275,10 +273,6 @@ export default function Dashboard() {
         if (session) {
           const response = await supabase.functions.invoke('heroku-deploy?action=delete', {
             body: { appName: herokuAppName },
-            headers: {
-              Authorization: `Bearer ${session.access_token}`,
-            },
-            method: 'POST',
           });
 
           if (response.error) {
