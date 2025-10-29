@@ -9,6 +9,26 @@ import { Textarea } from '@/components/ui/textarea';
 import { toast } from 'sonner';
 import { Rocket, LogOut, Plus, Users, Package, Settings, BarChart, Key, Download, Check, X, Loader2, Trash2 } from 'lucide-react';
 import { ThemeToggle } from '@/components/ThemeToggle';
+import { z } from 'zod';
+
+const githubUrlSchema = z.string()
+  .url('Must be a valid URL')
+  .regex(/^https:\/\/github\.com\/[^/]+\/[^/]+/, 'Must be a valid GitHub repository URL');
+
+const templateSchema = z.object({
+  name: z.string().trim().min(1, 'Name is required').max(100, 'Name must be less than 100 characters'),
+  description: z.string().trim().min(1, 'Description is required').max(500, 'Description must be less than 500 characters'),
+  github_repo_url: githubUrlSchema,
+  default_app_name: z.string().trim().max(30, 'Default app name must be 30 characters or less')
+    .regex(/^[a-z0-9-]*$/, 'Must be lowercase letters, numbers, and hyphens only')
+    .optional(),
+  config_vars_metadata: z.array(z.object({
+    name: z.string().min(1).max(100),
+    description: z.string().max(500),
+    defaultValue: z.string().max(1000),
+    required: z.boolean()
+  })).optional()
+});
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Badge } from '@/components/ui/badge';
@@ -217,22 +237,20 @@ export default function Admin() {
   };
 
   const handleAddTemplate = async () => {
-    if (!newTemplate.name || !newTemplate.description || !newTemplate.github_repo_url) {
-      toast.error('All fields are required');
-      return;
-    }
-
     try {
-      const herokuUrl = `https://dashboard.heroku.com/new?template=${newTemplate.github_repo_url}`;
+      // Validate template data
+      const validatedTemplate = templateSchema.parse(newTemplate);
+      
+      const herokuUrl = `https://dashboard.heroku.com/new?template=${validatedTemplate.github_repo_url}`;
       
       const { error } = await supabase.from('app_templates').insert({
-        name: newTemplate.name,
-        description: newTemplate.description,
-        github_repo_url: newTemplate.github_repo_url,
+        name: validatedTemplate.name,
+        description: validatedTemplate.description,
+        github_repo_url: validatedTemplate.github_repo_url,
         heroku_deploy_url: herokuUrl,
-        config_vars: newTemplate.config_vars_metadata.map(v => v.name) as any,
-        config_vars_metadata: newTemplate.config_vars_metadata as any,
-        default_app_name: newTemplate.default_app_name,
+        config_vars: (validatedTemplate.config_vars_metadata || []).map(v => v.name) as any,
+        config_vars_metadata: validatedTemplate.config_vars_metadata as any,
+        default_app_name: validatedTemplate.default_app_name || null,
         created_by: (await supabase.auth.getUser()).data.user!.id,
       });
 
@@ -249,7 +267,11 @@ export default function Admin() {
       setDetectedVars([]);
       fetchData();
     } catch (error: any) {
-      toast.error(error.message);
+      if (error instanceof z.ZodError) {
+        toast.error(error.errors[0].message);
+      } else {
+        toast.error(error.message);
+      }
     }
   };
 

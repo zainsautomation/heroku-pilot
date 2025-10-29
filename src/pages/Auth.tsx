@@ -8,6 +8,22 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { toast } from 'sonner';
 import { Rocket, Eye, EyeOff } from 'lucide-react';
+import { z } from 'zod';
+
+const signInSchema = z.object({
+  email: z.string().email('Invalid email address').max(255, 'Email must be less than 255 characters'),
+  password: z.string().min(1, 'Password is required'),
+});
+
+const signUpSchema = z.object({
+  email: z.string().email('Invalid email address').max(255, 'Email must be less than 255 characters'),
+  password: z.string()
+    .min(8, 'Password must be at least 8 characters')
+    .regex(/[A-Z]/, 'Password must contain at least one uppercase letter')
+    .regex(/[a-z]/, 'Password must contain at least one lowercase letter')
+    .regex(/[0-9]/, 'Password must contain at least one number'),
+  fullName: z.string().trim().min(2, 'Name must be at least 2 characters').max(100, 'Name must be less than 100 characters'),
+});
 
 export default function Auth() {
   const [email, setEmail] = useState('');
@@ -32,30 +48,52 @@ export default function Auth() {
     e.preventDefault();
     setLoading(true);
 
-    const { error } = await signIn(email, password);
-    
-    if (error) {
-      toast.error(error.message);
-    } else {
-      toast.success('Signed in successfully!');
+    try {
+      const validatedData = signInSchema.parse({ email, password });
+      const { error } = await signIn(validatedData.email, validatedData.password);
+      
+      if (error) {
+        toast.error(error.message);
+      } else {
+        toast.success('Signed in successfully!');
+      }
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        toast.error(error.errors[0].message);
+      } else {
+        toast.error('An error occurred during sign in');
+      }
+    } finally {
+      setLoading(false);
     }
-    
-    setLoading(false);
   };
 
   const handleSignUp = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
 
-    const { error } = await signUp(email, password, fullName);
-    
-    if (error) {
-      toast.error(error.message);
-    } else {
-      toast.success('Account created! Please check your email to verify.');
+    try {
+      const validatedData = signUpSchema.parse({ email, password, fullName });
+      const { error } = await signUp(
+        validatedData.email, 
+        validatedData.password, 
+        validatedData.fullName
+      );
+      
+      if (error) {
+        toast.error(error.message);
+      } else {
+        toast.success('Account created! Please check your email to verify.');
+      }
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        toast.error(error.errors[0].message);
+      } else {
+        toast.error('An error occurred during sign up');
+      }
+    } finally {
+      setLoading(false);
     }
-    
-    setLoading(false);
   };
 
   return (

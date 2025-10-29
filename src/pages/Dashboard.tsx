@@ -19,6 +19,13 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { z } from 'zod';
+
+const configVarSchema = z.record(z.string().max(2000, 'Configuration value is too long').trim());
+const appNameSchema = z.string()
+  .min(1, 'App name is required')
+  .max(30, 'App name must be 30 characters or less')
+  .regex(/^[a-z0-9-]+$/, 'App name must be lowercase letters, numbers, and hyphens only');
 
 interface ConfigVarMetadata {
   name: string;
@@ -189,15 +196,28 @@ export default function Dashboard() {
   const handleDeploy = async () => {
     if (!selectedTemplate || deploying) return;
 
-    // Validate required fields
-    const metadata = selectedTemplate.config_vars_metadata || [];
-    const missingRequired = metadata.filter(
-      meta => meta.required && !configVars[meta.name]
-    );
+    try {
+      // Validate app name
+      appNameSchema.parse(appName);
+      
+      // Validate config vars
+      configVarSchema.parse(configVars);
+      
+      // Validate required fields
+      const metadata = selectedTemplate.config_vars_metadata || [];
+      const missingRequired = metadata.filter(
+        meta => meta.required && !configVars[meta.name]
+      );
 
-    if (missingRequired.length > 0) {
-      toast.error(`Please fill in required fields: ${missingRequired.map(m => m.name).join(', ')}`);
-      return;
+      if (missingRequired.length > 0) {
+        toast.error(`Please fill in required fields: ${missingRequired.map(m => m.name).join(', ')}`);
+        return;
+      }
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        toast.error(error.errors[0].message);
+        return;
+      }
     }
 
     setDeploying(true);
