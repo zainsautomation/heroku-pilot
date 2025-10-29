@@ -757,11 +757,11 @@ export default function Admin() {
               </Card>
 
               {role === 'admin' && (
-                <Card className="shadow-elevated">
+                <Card className="shadow-elevated border-destructive">
                   <CardHeader>
                     <CardTitle>
                       <div className="flex items-center gap-2">
-                        <Key className="h-5 w-5" />
+                        <Key className="h-5 w-5 text-destructive" />
                         Heroku API Configuration
                       </div>
                     </CardTitle>
@@ -770,6 +770,23 @@ export default function Admin() {
                     </CardDescription>
                   </CardHeader>
                   <CardContent className="space-y-4">
+                    {!herokuApiKey && (
+                      <div className="p-4 border border-destructive bg-destructive/10 rounded-lg">
+                        <p className="text-sm font-medium text-destructive mb-2">⚠️ No Heroku API Key Set</p>
+                        <p className="text-sm text-muted-foreground">
+                          Deployments will fail until you add a valid Heroku API key. Get your API key from{' '}
+                          <a 
+                            href="https://dashboard.heroku.com/account" 
+                            target="_blank" 
+                            rel="noopener noreferrer"
+                            className="underline hover:text-primary"
+                          >
+                            Heroku Account Settings
+                          </a>
+                        </p>
+                      </div>
+                    )}
+                    
                     <div className="space-y-2">
                       <Label>Heroku API Key</Label>
                       <div className="flex gap-2">
@@ -778,6 +795,7 @@ export default function Admin() {
                           value={herokuApiKey}
                           onChange={(e) => setHerokuApiKey(e.target.value)}
                           placeholder="Enter Heroku API key"
+                          className={!herokuApiKey ? 'border-destructive' : ''}
                         />
                         <Button
                           variant="outline"
@@ -787,13 +805,24 @@ export default function Admin() {
                           {showHerokuKey ? '🙈' : '👁️'}
                         </Button>
                       </div>
-                      <p className="text-sm text-muted-foreground">
-                        This key will be used to deploy apps via Heroku API
-                      </p>
+                      <div className="space-y-1">
+                        <p className="text-sm text-muted-foreground">
+                          This key will be used to deploy apps via Heroku API
+                        </p>
+                        <p className="text-xs text-muted-foreground">
+                          How to get your API key:
+                        </p>
+                        <ol className="text-xs text-muted-foreground list-decimal list-inside space-y-1 ml-2">
+                          <li>Go to <a href="https://dashboard.heroku.com/account" target="_blank" rel="noopener noreferrer" className="underline">Heroku Account Settings</a></li>
+                          <li>Scroll to "API Key" section</li>
+                          <li>Click "Reveal" to see your API key</li>
+                          <li>Copy and paste it here</li>
+                        </ol>
+                      </div>
                     </div>
                     
-                    <Button onClick={handleUpdateHerokuKey}>
-                      Save API Key
+                    <Button onClick={handleUpdateHerokuKey} disabled={!herokuApiKey}>
+                      {herokuApiKey ? 'Update' : 'Save'} API Key
                     </Button>
                   </CardContent>
                 </Card>
