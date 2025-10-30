@@ -313,26 +313,52 @@ export default function Dashboard() {
   return (
     <div className="min-h-screen bg-background">
       <header className="border-b border-border bg-card/50 backdrop-blur-sm sticky top-0 z-10">
-        <div className="container mx-auto px-4 py-4 flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div className="p-2 rounded-lg bg-primary/10">
-              <Rocket className="h-6 w-6 text-primary" />
+        <div className="container mx-auto px-4 py-3 sm:py-4">
+          <div className="flex items-center justify-between gap-2">
+            <div className="flex items-center gap-2 sm:gap-3">
+              <div className="p-1.5 sm:p-2 rounded-lg bg-primary/10">
+                <Rocket className="h-5 w-5 sm:h-6 sm:w-6 text-primary" />
+              </div>
+              <h1 className="text-lg sm:text-2xl font-bold">User Dashboard</h1>
             </div>
-            <h1 className="text-2xl font-bold">User Dashboard</h1>
-          </div>
-          
-          <div className="flex items-center gap-4">
-            <Button variant="outline" onClick={() => setShowHistory(true)}>
-              <History className="h-4 w-4 mr-2" />
-              History
-            </Button>
-          <div className="flex items-center gap-2">
-            <ThemeToggle />
-            <Button variant="outline" onClick={signOut}>
-              <LogOut className="h-4 w-4 mr-2" />
-              Sign Out
-            </Button>
-          </div>
+            
+            <div className="flex items-center gap-1 sm:gap-2">
+              <Button 
+                variant="outline" 
+                size="sm"
+                onClick={() => setShowHistory(true)}
+                className="hidden sm:flex"
+              >
+                <History className="h-4 w-4 mr-2" />
+                History
+              </Button>
+              <Button 
+                variant="outline" 
+                size="icon"
+                onClick={() => setShowHistory(true)}
+                className="sm:hidden"
+              >
+                <History className="h-4 w-4" />
+              </Button>
+              <ThemeToggle />
+              <Button 
+                variant="outline" 
+                size="sm"
+                onClick={signOut}
+                className="hidden sm:flex"
+              >
+                <LogOut className="h-4 w-4 mr-2" />
+                Sign Out
+              </Button>
+              <Button 
+                variant="outline" 
+                size="icon"
+                onClick={signOut}
+                className="sm:hidden"
+              >
+                <LogOut className="h-4 w-4" />
+              </Button>
+            </div>
           </div>
         </div>
       </header>
@@ -344,7 +370,7 @@ export default function Dashboard() {
             <CardDescription>Track your deployment usage</CardDescription>
           </CardHeader>
           <CardContent>
-            <div className="flex items-center justify-between">
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
               <div>
                 <p className="text-3xl font-bold">
                   {deploymentLimit.used} / {deploymentLimit.max}
@@ -352,9 +378,16 @@ export default function Dashboard() {
                 <p className="text-sm text-muted-foreground mt-1">Deployments used</p>
               </div>
               
-              {!canDeploy && limitMessage && (
+              {deploymentLimit.max === 0 && limitMessage && (
                 <div className="flex items-center gap-2 text-warning">
-                  <AlertCircle className="h-5 w-5" />
+                  <AlertCircle className="h-5 w-5 flex-shrink-0" />
+                  <p className="text-sm">{limitMessage}</p>
+                </div>
+              )}
+              
+              {!canDeploy && deploymentLimit.max > 0 && limitMessage && (
+                <div className="flex items-center gap-2 text-warning">
+                  <AlertCircle className="h-5 w-5 flex-shrink-0" />
                   <p className="text-sm">{limitMessage}</p>
                 </div>
               )}

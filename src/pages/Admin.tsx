@@ -161,7 +161,7 @@ export default function Admin() {
           email: profile.email,
           full_name: profile.full_name,
           role: userRole?.role || 'user',
-          max_deployments: userLimit?.max_deployments || 5,
+          max_deployments: userLimit?.max_deployments || 0,
           deployment_count: userDeployments,
         };
       });
@@ -442,45 +442,62 @@ export default function Admin() {
   return (
     <div className="min-h-screen bg-background">
       <header className="border-b border-border bg-card/50 backdrop-blur-sm sticky top-0 z-10">
-        <div className="container mx-auto px-4 py-4 flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div className="p-2 rounded-lg bg-primary/10">
-              <Rocket className="h-6 w-6 text-primary" />
+        <div className="container mx-auto px-4 py-3 sm:py-4">
+          <div className="flex items-center justify-between gap-2">
+            <div className="flex items-center gap-2 sm:gap-3">
+              <div className="p-1.5 sm:p-2 rounded-lg bg-primary/10">
+                <Rocket className="h-5 w-5 sm:h-6 sm:w-6 text-primary" />
+              </div>
+              <div>
+                <h1 className="text-lg sm:text-2xl font-bold">Admin Dashboard</h1>
+                <Badge variant="outline" className="mt-0.5 sm:mt-1 text-xs">
+                  {role === 'admin' ? 'Administrator' : 'Moderator'}
+                </Badge>
+              </div>
             </div>
-            <div>
-              <h1 className="text-2xl font-bold">Admin Dashboard</h1>
-              <Badge variant="outline" className="mt-1">{role === 'admin' ? 'Administrator' : 'Moderator'}</Badge>
+            
+            <div className="flex items-center gap-1 sm:gap-2">
+              <ThemeToggle />
+              <Button 
+                variant="outline" 
+                size="sm"
+                onClick={signOut}
+                className="hidden sm:flex"
+              >
+                <LogOut className="h-4 w-4 mr-2" />
+                Sign Out
+              </Button>
+              <Button 
+                variant="outline" 
+                size="icon"
+                onClick={signOut}
+                className="sm:hidden"
+              >
+                <LogOut className="h-4 w-4" />
+              </Button>
             </div>
-          </div>
-          
-          <div className="flex items-center gap-2">
-            <ThemeToggle />
-            <Button variant="outline" onClick={signOut}>
-              <LogOut className="h-4 w-4 mr-2" />
-              Sign Out
-            </Button>
           </div>
         </div>
       </header>
 
       <main className="container mx-auto px-4 py-8">
         <Tabs defaultValue="users" className="space-y-6">
-          <TabsList className="grid w-full grid-cols-4">
-            <TabsTrigger value="users">
-              <Users className="h-4 w-4 mr-2" />
-              Users
+          <TabsList className="grid w-full grid-cols-4 h-auto">
+            <TabsTrigger value="users" className="flex-col sm:flex-row gap-1 sm:gap-2 py-2 sm:py-1.5">
+              <Users className="h-4 w-4" />
+              <span className="text-xs sm:text-sm">Users</span>
             </TabsTrigger>
-            <TabsTrigger value="templates">
-              <Package className="h-4 w-4 mr-2" />
-              Templates
+            <TabsTrigger value="templates" className="flex-col sm:flex-row gap-1 sm:gap-2 py-2 sm:py-1.5">
+              <Package className="h-4 w-4" />
+              <span className="text-xs sm:text-sm">Templates</span>
             </TabsTrigger>
-            <TabsTrigger value="deployments">
-              <BarChart className="h-4 w-4 mr-2" />
-              Deployments
+            <TabsTrigger value="deployments" className="flex-col sm:flex-row gap-1 sm:gap-2 py-2 sm:py-1.5">
+              <BarChart className="h-4 w-4" />
+              <span className="text-xs sm:text-sm">Deploys</span>
             </TabsTrigger>
-            <TabsTrigger value="settings">
-              <Settings className="h-4 w-4 mr-2" />
-              Settings
+            <TabsTrigger value="settings" className="flex-col sm:flex-row gap-1 sm:gap-2 py-2 sm:py-1.5">
+              <Settings className="h-4 w-4" />
+              <span className="text-xs sm:text-sm">Settings</span>
             </TabsTrigger>
           </TabsList>
 
@@ -813,7 +830,7 @@ export default function Admin() {
                 </CardContent>
               </Card>
 
-              {role === 'admin' && (
+              {(role === 'admin' || role === 'moderator') && (
                 <Card className="shadow-elevated border-destructive">
                   <CardHeader>
                     <CardTitle>
