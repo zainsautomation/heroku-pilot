@@ -364,36 +364,45 @@ export default function Dashboard() {
       </header>
 
       <main className="container mx-auto px-4 py-8">
-        <Card className="mb-8 shadow-elevated">
-          <CardHeader>
-            <CardTitle>Deployment Limit</CardTitle>
-            <CardDescription>Track your deployment usage</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-              <div>
-                <p className="text-3xl font-bold">
-                  {deploymentLimit.used} / {deploymentLimit.max}
-                </p>
-                <p className="text-sm text-muted-foreground mt-1">Deployments used</p>
+        {deploymentLimit.max === 0 ? (
+          <Card className="mb-8 shadow-elevated border-warning">
+            <CardContent className="py-6">
+              <div className="flex items-center gap-3 text-warning">
+                <AlertCircle className="h-6 w-6 flex-shrink-0" />
+                <div>
+                  <p className="font-semibold mb-1">Deployment Limit Not Set</p>
+                  <p className="text-sm text-muted-foreground">
+                    {limitMessage || 'Please contact the administrator to set your deployment limit.'}
+                  </p>
+                </div>
               </div>
-              
-              {deploymentLimit.max === 0 && limitMessage && (
-                <div className="flex items-center gap-2 text-warning">
-                  <AlertCircle className="h-5 w-5 flex-shrink-0" />
-                  <p className="text-sm">{limitMessage}</p>
+            </CardContent>
+          </Card>
+        ) : (
+          <Card className="mb-8 shadow-elevated">
+            <CardHeader>
+              <CardTitle>Deployment Limit</CardTitle>
+              <CardDescription>Track your deployment usage</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+                <div>
+                  <p className="text-3xl font-bold">
+                    {deploymentLimit.used} / {deploymentLimit.max}
+                  </p>
+                  <p className="text-sm text-muted-foreground mt-1">Deployments used</p>
                 </div>
-              )}
-              
-              {!canDeploy && deploymentLimit.max > 0 && limitMessage && (
-                <div className="flex items-center gap-2 text-warning">
-                  <AlertCircle className="h-5 w-5 flex-shrink-0" />
-                  <p className="text-sm">{limitMessage}</p>
-                </div>
-              )}
-            </div>
-          </CardContent>
-        </Card>
+                
+                {!canDeploy && limitMessage && (
+                  <div className="flex items-center gap-2 text-warning">
+                    <AlertCircle className="h-5 w-5 flex-shrink-0" />
+                    <p className="text-sm">{limitMessage}</p>
+                  </div>
+                )}
+              </div>
+            </CardContent>
+          </Card>
+        )}
 
         <div>
           <h2 className="text-2xl font-bold mb-6">Available Apps</h2>
