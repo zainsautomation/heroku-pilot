@@ -209,6 +209,7 @@ Deno.serve(async (req) => {
 
       const buildData = await buildResponse.json();
       console.log('Build started:', buildData.id);
+      console.log('Build status:', buildData.status);
       console.log('Build output stream URL:', buildData.output_stream_url);
 
       // Create deployment record
@@ -307,7 +308,11 @@ Deno.serve(async (req) => {
 
     throw new Error('Invalid action');
   } catch (error) {
-    console.error('Error:', error);
+    console.error('Error occurred:', error);
+    console.error('Error type:', error instanceof Error ? 'Error' : typeof error);
+    console.error('Error message:', error instanceof Error ? error.message : String(error));
+    console.error('Error stack:', error instanceof Error ? error.stack : 'No stack trace');
+    
     const errorMessage = error instanceof Error ? error.message : 'Unknown error';
     return new Response(
       JSON.stringify({ error: errorMessage }),
