@@ -60,9 +60,9 @@ export default function BuildLogs() {
 
   const pollBuildStatus = async () => {
     try {
-      const { data, error } = await supabase.functions.invoke('heroku-deploy', {
-        body: JSON.stringify({ action: 'status', appName }),
-      });
+      const { data, error } = await supabase.functions.invoke(
+        `heroku-deploy?action=status&appName=${appName}`
+      );
 
       if (error) throw error;
 

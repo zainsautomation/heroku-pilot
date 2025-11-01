@@ -227,9 +227,8 @@ export default function Dashboard() {
       const { data: { session } } = await supabase.auth.getSession();
       if (!session) throw new Error('Not authenticated');
 
-      // Use supabase.functions.invoke without manual Authorization header
-      // The Supabase client handles authentication automatically
-      const response = await supabase.functions.invoke('heroku-deploy', {
+      // Pass action as URL parameter, other data in body
+      const response = await supabase.functions.invoke('heroku-deploy?action=create', {
         body: {
           templateId: selectedTemplate.id,
           configVars,
