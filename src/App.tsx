@@ -9,6 +9,7 @@ import Index from "./pages/Index";
 import Auth from "./pages/Auth";
 import Dashboard from "./pages/Dashboard";
 import Admin from "./pages/Admin";
+import BuildLogs from "./pages/BuildLogs";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -36,6 +37,14 @@ const App = () => (
               element={
                 <ProtectedRoute allowedRoles={['admin', 'moderator']}>
                   <Admin />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/build-logs"
+              element={
+                <ProtectedRoute allowedRoles={['user', 'admin', 'moderator']}>
+                  <BuildLogs />
                 </ProtectedRoute>
               }
             />

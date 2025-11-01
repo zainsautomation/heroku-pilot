@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useAuth } from '@/hooks/useAuth';
 import { supabase } from '@/integrations/supabase/client';
+import { useNavigate } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -59,6 +60,7 @@ interface Deployment {
 
 export default function Dashboard() {
   const { user, signOut } = useAuth();
+  const navigate = useNavigate();
   const [templates, setTemplates] = useState<AppTemplate[]>([]);
   const [deployments, setDeployments] = useState<Deployment[]>([]);
   const [deploymentLimit, setDeploymentLimit] = useState({ used: 0, max: 5 });
@@ -250,13 +252,13 @@ export default function Dashboard() {
       }
 
       toast.success(`Deployment started! App: ${response.data.appName}`);
-      toast.info(`Building app... This may take a few minutes.`);
-      toast.info(`URL: ${response.data.appUrl}`, { duration: 10000 });
       setSelectedTemplate(null);
       setShowConfigDialog(false);
       setConfigVars({});
       setAppName('');
-      await fetchData();
+      
+      // Redirect to build logs page
+      navigate(`/build-logs?id=${response.data.deploymentId}&appName=${response.data.appName}`);
     } catch (error: any) {
       console.error('Error deploying app:', error);
       toast.error(error.message || 'Failed to deploy app');

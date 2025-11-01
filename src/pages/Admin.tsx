@@ -7,8 +7,9 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { toast } from 'sonner';
-import { Rocket, LogOut, Plus, Users, Package, Settings, BarChart, Key, Download, Check, X, Loader2, Trash2 } from 'lucide-react';
+import { Rocket, LogOut, Plus, Users, Package, Settings, BarChart, Key, Download, Check, X, Loader2, Trash2, Search } from 'lucide-react';
 import { ThemeToggle } from '@/components/ThemeToggle';
+import { Alert, AlertDescription } from '@/components/ui/alert';
 import { z } from 'zod';
 
 const githubUrlSchema = z.string()
@@ -108,6 +109,8 @@ export default function Admin() {
   const [detectedVars, setDetectedVars] = useState<ConfigVarMetadata[]>([]);
   const [showVarsDialog, setShowVarsDialog] = useState(false);
   const [testingApiKey, setTestingApiKey] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [deletingUser, setDeletingUser] = useState<string | null>(null);
 
   useEffect(() => {
     fetchData();
@@ -428,6 +431,38 @@ export default function Admin() {
     }
   };
 
+  const handleDeleteUser = async (userId: string, userEmail: string) => {
+    if (role !== 'admin') {
+      toast.error('Only admins can delete users');
+      return;
+    }
+
+    if (!confirm(`Are you sure you want to delete user: ${userEmail}?\n\nThis will delete:\n- User profile\n- All deployments\n- Deployment limits\n- User roles\n\nThis action cannot be undone.`)) {
+      return;
+    }
+
+    setDeletingUser(userId);
+    try {
+      // Delete user from auth.users using admin API
+      const { error } = await supabase.auth.admin.deleteUser(userId);
+
+      if (error) throw error;
+
+      toast.success('User deleted successfully');
+      fetchData();
+    } catch (error: any) {
+      console.error('Error deleting user:', error);
+      toast.error('Failed to delete user: ' + error.message);
+    } finally {
+      setDeletingUser(null);
+    }
+  };
+
+  const filteredUsers = users.filter(user => 
+    user.email.toLowerCase().includes(searchQuery.toLowerCase()) ||
+    user.full_name?.toLowerCase().includes(searchQuery.toLowerCase())
+  );
+
   if (loading) {
     return (
       <div className="flex min-h-screen items-center justify-center">
@@ -507,7 +542,32 @@ export default function Admin() {
                 <CardTitle>User Management</CardTitle>
                 <CardDescription>View and manage user accounts and limits</CardDescription>
               </CardHeader>
-              <CardContent>
+              <CardContent className="space-y-4">
+                <div className="flex items-center gap-2">
+                  <div className="relative flex-1">
+                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                    <Input
+                      placeholder="Search users by email or name..."
+                      value={searchQuery}
+                      onChange={(e) => setSearchQuery(e.target.value)}
+                      className="pl-10"
+                    />
+                  </div>
+                  {searchQuery && (
+                    <Button variant="ghost" size="sm" onClick={() => setSearchQuery('')}>
+                      Clear
+                    </Button>
+                  )}
+                </div>
+
+                {role === 'admin' && (
+                  <Alert>
+                    <AlertDescription className="text-sm">
+                      ⚠️ Admin actions: You can change user roles, update deployment limits, and delete users. User deletion is permanent and will remove all associated data.
+                    </AlertDescription>
+                  </Alert>
+                )}
+
                 <Table>
                   <TableHeader>
                     <TableRow>
@@ -519,7 +579,14 @@ export default function Admin() {
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {users.map((user) => (
+                    {filteredUsers.length === 0 ? (
+                      <TableRow>
+                        <TableCell colSpan={5} className="text-center text-muted-foreground">
+                          No users found
+                        </TableCell>
+                      </TableRow>
+                    ) : (
+                      filteredUsers.map((user) => (
                       <TableRow key={user.id}>
                         <TableCell>{user.full_name || 'N/A'}</TableCell>
                         <TableCell>{user.email}</TableCell>
@@ -546,19 +613,36 @@ export default function Admin() {
                           {user.deployment_count} / {user.max_deployments}
                         </TableCell>
                         <TableCell>
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            onClick={() => {
-                              setSelectedUser(user);
-                              setNewLimit(user.max_deployments.toString());
-                            }}
-                          >
-                            Update Limit
-                          </Button>
+                          <div className="flex items-center gap-2">
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => {
+                                setSelectedUser(user);
+                                setNewLimit(user.max_deployments.toString());
+                              }}
+                            >
+                              Update Limit
+                            </Button>
+                            {role === 'admin' && (
+                              <Button
+                                variant="destructive"
+                                size="sm"
+                                onClick={() => handleDeleteUser(user.id, user.email)}
+                                disabled={deletingUser === user.id}
+                              >
+                                {deletingUser === user.id ? (
+                                  <Loader2 className="h-4 w-4 animate-spin" />
+                                ) : (
+                                  <Trash2 className="h-4 w-4" />
+                                )}
+                              </Button>
+                            )}
+                          </div>
                         </TableCell>
                       </TableRow>
-                    ))}
+                      ))
+                    )}
                   </TableBody>
                 </Table>
               </CardContent>
