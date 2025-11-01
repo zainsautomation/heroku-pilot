@@ -83,6 +83,7 @@ export type Database = {
       deployments: {
         Row: {
           app_template_id: string
+          build_log_url: string | null
           created_at: string
           error_message: string | null
           heroku_app_name: string | null
@@ -93,6 +94,7 @@ export type Database = {
         }
         Insert: {
           app_template_id: string
+          build_log_url?: string | null
           created_at?: string
           error_message?: string | null
           heroku_app_name?: string | null
@@ -103,6 +105,7 @@ export type Database = {
         }
         Update: {
           app_template_id?: string
+          build_log_url?: string | null
           created_at?: string
           error_message?: string | null
           heroku_app_name?: string | null

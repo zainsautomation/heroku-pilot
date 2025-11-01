@@ -212,7 +212,7 @@ Deno.serve(async (req) => {
       console.log('Build status:', buildData.status);
       console.log('Build output stream URL:', buildData.output_stream_url);
 
-      // Create deployment record
+      // Create deployment record with build output URL
       const { data: deploymentData, error: deployError } = await serviceClient
         .from('deployments')
         .insert({
@@ -221,6 +221,7 @@ Deno.serve(async (req) => {
           status: 'pending',
           heroku_app_url: `https://${appData.name}.herokuapp.com`,
           heroku_app_name: appData.name,
+          build_log_url: buildData.output_stream_url,
         })
         .select()
         .single();

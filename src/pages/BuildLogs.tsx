@@ -19,6 +19,7 @@ export default function BuildLogs() {
   const [buildStatus, setBuildStatus] = useState<string>('pending');
   const [logs, setLogs] = useState<string>('Fetching build logs...');
   const [appUrl, setAppUrl] = useState<string>('');
+  const [buildLogUrl, setBuildLogUrl] = useState<string>('');
   const [polling, setPolling] = useState(true);
 
   useEffect(() => {
@@ -47,6 +48,12 @@ export default function BuildLogs() {
       if (data) {
         setBuildStatus(data.status);
         setAppUrl(data.heroku_app_url || '');
+        setBuildLogUrl(data.build_log_url || '');
+        
+        // Fetch actual build logs if URL is available
+        if (data.build_log_url) {
+          fetchHerokuBuildLogs(data.build_log_url);
+        }
         
         if (data.status === 'success' || data.status === 'failed') {
           setPolling(false);
@@ -55,6 +62,19 @@ export default function BuildLogs() {
     } catch (error: any) {
       console.error('Error fetching deployment:', error);
       toast.error('Failed to load deployment info');
+    }
+  };
+
+  const fetchHerokuBuildLogs = async (logUrl: string) => {
+    try {
+      const response = await fetch(logUrl);
+      if (response.ok) {
+        const logText = await response.text();
+        setLogs(logText || 'Build in progress...');
+      }
+    } catch (error) {
+      console.error('Error fetching build logs:', error);
+      // Don't show error to user, logs might not be available yet
     }
   };
 
@@ -70,13 +90,17 @@ export default function BuildLogs() {
         const status = data.status;
         setBuildStatus(status);
 
+        // Fetch real build logs if URL is available
+        if (buildLogUrl) {
+          fetchHerokuBuildLogs(buildLogUrl);
+        }
+
         if (status === 'succeeded') {
           await supabase
             .from('deployments')
             .update({ status: 'success' })
             .eq('id', deploymentId);
           
-          setLogs('Build completed successfully!\n\nYour app is now deployed and ready to use.');
           setPolling(false);
           toast.success('Deployment successful!');
         } else if (status === 'failed') {
@@ -85,11 +109,8 @@ export default function BuildLogs() {
             .update({ status: 'failed', error_message: 'Build failed on Heroku' })
             .eq('id', deploymentId);
           
-          setLogs('Build failed.\n\nPlease check your GitHub repository for issues:\n- Invalid package.json dependencies\n- Missing required files\n- Configuration errors\n\nView detailed logs in your Heroku dashboard.');
           setPolling(false);
           toast.error('Deployment failed');
-        } else if (status === 'pending') {
-          setLogs('Build is in progress...\n\nThis may take a few minutes. Heroku is:\n1. Downloading your code\n2. Installing dependencies\n3. Building your application\n4. Starting the app\n\nPlease wait...');
         }
       }
     } catch (error: any) {
