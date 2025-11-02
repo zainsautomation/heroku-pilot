@@ -9,6 +9,7 @@ interface DeployRequest {
   templateId: string;
   configVars: Record<string, string>;
   appName?: string;
+  branch?: string;
 }
 
 interface DeleteRequest {
@@ -78,11 +79,12 @@ Deno.serve(async (req) => {
     console.log('Using Heroku API key (first 10 chars):', herokuApiKey.substring(0, 10) + '...');
 
     if (action === 'create') {
-      const { templateId, configVars, appName: customAppName }: DeployRequest = await req.json();
+      const { templateId, configVars, appName: customAppName, branch }: DeployRequest = await req.json();
 
       console.log('Creating Heroku app for template:', templateId);
       console.log('Config vars:', configVars);
       console.log('Custom app name:', customAppName);
+      console.log('Branch:', branch || 'auto-detect');
 
       // Get template info
       const { data: template, error: templateError } = await serviceClient
@@ -106,6 +108,26 @@ Deno.serve(async (req) => {
       }
       const repoPath = repoMatch[1].replace(/\.git$/, '');
       console.log('GitHub repo path:', repoPath);
+
+      // Detect default branch if not specified
+      let deployBranch = branch;
+      if (!deployBranch) {
+        console.log('Auto-detecting default branch...');
+        try {
+          const repoApiResponse = await fetch(`https://api.github.com/repos/${repoPath}`);
+          if (repoApiResponse.ok) {
+            const repoData = await repoApiResponse.json();
+            deployBranch = repoData.default_branch || 'main';
+            console.log('Detected default branch:', deployBranch);
+          } else {
+            deployBranch = 'main';
+            console.log('Could not detect branch, defaulting to main');
+          }
+        } catch (e) {
+          deployBranch = 'main';
+          console.log('Error detecting branch, defaulting to main:', e);
+        }
+      }
 
       // Create app on Heroku
       const baseAppName = customAppName || template.default_app_name || 'app';
@@ -174,7 +196,7 @@ Deno.serve(async (req) => {
       }
 
       // Create build from GitHub
-      console.log('Starting build from GitHub...');
+      console.log(`Starting build from GitHub branch: ${deployBranch}...`);
       
       const buildResponse = await fetch(`https://api.heroku.com/apps/${appData.name}/builds`, {
         method: 'POST',
@@ -185,7 +207,7 @@ Deno.serve(async (req) => {
         },
         body: JSON.stringify({
           source_blob: {
-            url: `https://github.com/${repoPath}/tarball/main`,
+            url: `https://github.com/${repoPath}/tarball/${deployBranch}`,
           },
         }),
       });
