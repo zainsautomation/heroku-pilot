@@ -316,6 +316,20 @@ Deno.serve(async (req) => {
       });
 
       if (!buildsResponse.ok) {
+        // If app doesn't exist (404), return deleted status instead of error
+        if (buildsResponse.status === 404) {
+          console.log('App not found on Heroku (likely deleted):', appName);
+          return new Response(
+            JSON.stringify({
+              status: 'deleted',
+              buildId: null,
+            }),
+            {
+              headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+            }
+          );
+        }
+        
         const errorText = await buildsResponse.text();
         console.error('Failed to get build status:', buildsResponse.status, errorText);
         throw new Error(`Failed to get build status: ${buildsResponse.status} - ${errorText}`);

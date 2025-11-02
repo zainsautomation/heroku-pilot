@@ -111,6 +111,15 @@ export default function BuildLogs() {
           
           setPolling(false);
           toast.error('Deployment failed');
+        } else if (status === 'deleted') {
+          await supabase
+            .from('deployments')
+            .update({ status: 'failed', error_message: 'App was deleted from Heroku' })
+            .eq('id', deploymentId);
+          
+          setPolling(false);
+          setLogs('App was deleted from Heroku. The deployment no longer exists.');
+          toast.error('App was deleted from Heroku');
         }
       }
     } catch (error: any) {
@@ -120,13 +129,13 @@ export default function BuildLogs() {
 
   const getStatusColor = () => {
     if (buildStatus === 'success' || buildStatus === 'succeeded') return 'default';
-    if (buildStatus === 'failed') return 'destructive';
+    if (buildStatus === 'failed' || buildStatus === 'deleted') return 'destructive';
     return 'secondary';
   };
 
   const getStatusIcon = () => {
     if (buildStatus === 'success' || buildStatus === 'succeeded') return <CheckCircle className="h-5 w-5" />;
-    if (buildStatus === 'failed') return <XCircle className="h-5 w-5" />;
+    if (buildStatus === 'failed' || buildStatus === 'deleted') return <XCircle className="h-5 w-5" />;
     return <Loader2 className="h-5 w-5 animate-spin" />;
   };
 
