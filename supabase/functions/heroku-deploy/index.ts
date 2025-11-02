@@ -195,8 +195,10 @@ Deno.serve(async (req) => {
         console.log('No config vars to set');
       }
 
-      // Create build from GitHub
+      // Create build from GitHub using archive (same as Deploy to Heroku button)
       console.log(`Starting build from GitHub branch: ${deployBranch}...`);
+      const archiveUrl = `https://github.com/${repoPath}/archive/refs/heads/${deployBranch}.tar.gz`;
+      console.log('Archive URL:', archiveUrl);
       
       const buildResponse = await fetch(`https://api.heroku.com/apps/${appData.name}/builds`, {
         method: 'POST',
@@ -207,7 +209,7 @@ Deno.serve(async (req) => {
         },
         body: JSON.stringify({
           source_blob: {
-            url: `https://github.com/${repoPath}/tarball/${deployBranch}`,
+            url: archiveUrl,
           },
         }),
       });
