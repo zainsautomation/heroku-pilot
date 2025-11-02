@@ -52,7 +52,7 @@ export default function BuildLogs() {
         
         // Fetch actual build logs if URL is available
         if (data.build_log_url) {
-          fetchHerokuBuildLogs(data.build_log_url);
+          await fetchHerokuBuildLogs(data.build_log_url);
         }
         
         if (data.status === 'success' || data.status === 'failed') {
@@ -67,14 +67,21 @@ export default function BuildLogs() {
 
   const fetchHerokuBuildLogs = async (logUrl: string) => {
     try {
+      console.log('Fetching build logs from:', logUrl);
       const response = await fetch(logUrl);
+      console.log('Build logs response status:', response.status);
+      
       if (response.ok) {
         const logText = await response.text();
+        console.log('Build logs received, length:', logText.length);
         setLogs(logText || 'Build in progress...');
+      } else {
+        console.log('Build logs not available yet, status:', response.status);
+        setLogs('Waiting for build logs from Heroku...');
       }
     } catch (error) {
       console.error('Error fetching build logs:', error);
-      // Don't show error to user, logs might not be available yet
+      setLogs('Waiting for build to start...');
     }
   };
 
@@ -88,11 +95,14 @@ export default function BuildLogs() {
 
       if (data) {
         const status = data.status;
+        const logUrl = data.buildLogUrl;
+        
         setBuildStatus(status);
 
         // Fetch real build logs if URL is available
-        if (buildLogUrl) {
-          fetchHerokuBuildLogs(buildLogUrl);
+        if (logUrl) {
+          setBuildLogUrl(logUrl);
+          await fetchHerokuBuildLogs(logUrl);
         }
 
         if (status === 'succeeded') {
@@ -104,6 +114,11 @@ export default function BuildLogs() {
           setPolling(false);
           toast.success('Deployment successful!');
         } else if (status === 'failed') {
+          // Fetch final logs one more time to show the error
+          if (logUrl) {
+            await fetchHerokuBuildLogs(logUrl);
+          }
+          
           await supabase
             .from('deployments')
             .update({ status: 'failed', error_message: 'Build failed on Heroku' })

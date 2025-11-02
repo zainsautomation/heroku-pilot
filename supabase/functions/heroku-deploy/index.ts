@@ -337,12 +337,29 @@ Deno.serve(async (req) => {
 
       const builds = await buildsResponse.json();
       console.log('Builds response:', JSON.stringify(builds));
+      
+      if (builds.length === 0) {
+        return new Response(
+          JSON.stringify({
+            status: 'pending',
+            buildId: null,
+            buildLogUrl: null,
+          }),
+          {
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+          }
+        );
+      }
+
       const latestBuild = builds[0];
+      console.log('Latest build status:', latestBuild.status);
+      console.log('Latest build log URL:', latestBuild.output_stream_url);
 
       return new Response(
         JSON.stringify({
-          status: latestBuild?.status || 'unknown',
-          buildId: latestBuild?.id,
+          status: latestBuild.status,
+          buildId: latestBuild.id,
+          buildLogUrl: latestBuild.output_stream_url || null,
         }),
         {
           headers: { ...corsHeaders, 'Content-Type': 'application/json' },
