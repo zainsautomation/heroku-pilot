@@ -303,21 +303,26 @@ Deno.serve(async (req) => {
         throw new Error('App name required');
       }
 
+      console.log('Checking build status for app:', appName);
+
       // Get build status
       const buildsResponse = await fetch(`https://api.heroku.com/apps/${appName}/builds`, {
         method: 'GET',
         headers: {
           'Authorization': `Bearer ${herokuApiKey}`,
           'Accept': 'application/vnd.heroku+json; version=3',
-          'Range': 'id ..; max=1, order=desc',
+          'Range': 'created_at ..; max=1, order=desc',
         },
       });
 
       if (!buildsResponse.ok) {
-        throw new Error('Failed to get build status');
+        const errorText = await buildsResponse.text();
+        console.error('Failed to get build status:', buildsResponse.status, errorText);
+        throw new Error(`Failed to get build status: ${buildsResponse.status} - ${errorText}`);
       }
 
       const builds = await buildsResponse.json();
+      console.log('Builds response:', JSON.stringify(builds));
       const latestBuild = builds[0];
 
       return new Response(
