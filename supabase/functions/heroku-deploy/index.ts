@@ -142,7 +142,7 @@ Deno.serve(async (req) => {
           name: appName,
         },
         source_blob: {
-          url: `https://github.com/${repoPath}/tarball/${deployBranch}`,
+          url: `https://github.com/${repoPath}/tarball/${deployBranch}/`,
         },
         overrides: configVars && Object.keys(configVars).length > 0 ? {
           env: configVars,
