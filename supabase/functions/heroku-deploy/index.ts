@@ -195,22 +195,26 @@ Deno.serve(async (req) => {
         console.log('No config vars to set');
       }
 
-      // Check if repo has app.json (required for Heroku deployment)
+      // Check if repo has app.json (optional, but recommended)
       console.log('Checking for app.json in repository...');
       const appJsonUrl = `https://api.github.com/repos/${repoPath}/contents/app.json?ref=${deployBranch}`;
-      const appJsonCheck = await fetch(appJsonUrl, {
-        headers: {
-          'Accept': 'application/vnd.github.v3+json',
-          'User-Agent': 'Heroku-Deployment-Service',
-        },
-      });
+      try {
+        const appJsonCheck = await fetch(appJsonUrl, {
+          headers: {
+            'Accept': 'application/vnd.github.v3+json',
+            'User-Agent': 'Heroku-Deployment-Service',
+          },
+        });
 
-      if (!appJsonCheck.ok) {
-        console.error('app.json not found in repository');
-        throw new Error('Repository must contain an app.json file for Heroku deployment. Please ensure the repository has a valid app.json in the root directory.');
+        if (appJsonCheck.ok) {
+          console.log('✓ app.json found in repository');
+        } else {
+          console.warn('⚠ app.json not found - Heroku will use default buildpack detection');
+          console.warn('Repository should contain package.json for Node.js apps');
+        }
+      } catch (e) {
+        console.warn('Could not check for app.json:', e);
       }
-
-      console.log('app.json found, proceeding with deployment...');
 
       // Create build from GitHub using tarball (provides files at root level)
       console.log(`Starting build from GitHub branch: ${deployBranch}...`);
