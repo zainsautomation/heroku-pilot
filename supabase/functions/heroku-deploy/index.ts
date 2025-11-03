@@ -81,7 +81,7 @@ Deno.serve(async (req) => {
     if (action === 'create') {
       const { templateId, configVars, appName: customAppName, branch }: DeployRequest = await req.json();
 
-      console.log('Creating Heroku app for template:', templateId);
+      console.log('Creating Heroku deployment for template:', templateId);
       console.log('Config vars:', configVars);
       console.log('Custom app name:', customAppName);
       console.log('Branch:', branch || 'auto-detect');
@@ -129,28 +129,42 @@ Deno.serve(async (req) => {
         }
       }
 
-      // Create app on Heroku
+      // Generate app name
       const baseAppName = customAppName || template.default_app_name || 'app';
       const appName = `${baseAppName}-${Date.now()}`.toLowerCase().replace(/[^a-z0-9-]/g, '-');
+      console.log('App name:', appName);
+
+      // Use App Setups API (same as "Deploy to Heroku" button)
+      // This API properly handles app.json and buildpacks
+      console.log('Creating app setup using Heroku App Setups API...');
+      const setupPayload = {
+        app: {
+          name: appName,
+        },
+        source_blob: {
+          url: `https://github.com/${repoPath}/tarball/${deployBranch}`,
+        },
+        overrides: configVars && Object.keys(configVars).length > 0 ? {
+          env: configVars,
+        } : undefined,
+      };
       
-      console.log('Creating Heroku app with name:', appName);
+      console.log('Setup payload:', JSON.stringify(setupPayload, null, 2));
       
-      const createAppResponse = await fetch('https://api.heroku.com/apps', {
+      const setupResponse = await fetch('https://api.heroku.com/app-setups', {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${herokuApiKey}`,
           'Accept': 'application/vnd.heroku+json; version=3',
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({
-          name: appName,
-        }),
+        body: JSON.stringify(setupPayload),
       });
 
-      if (!createAppResponse.ok) {
-        const errorText = await createAppResponse.text();
-        console.error('Heroku app creation failed:', errorText);
-        let errorMessage = 'Failed to create Heroku app';
+      if (!setupResponse.ok) {
+        const errorText = await setupResponse.text();
+        console.error('Heroku app setup failed:', errorText);
+        let errorMessage = 'Failed to create Heroku app setup';
         
         try {
           const errorJson = JSON.parse(errorText);
@@ -167,107 +181,23 @@ Deno.serve(async (req) => {
         throw new Error(errorMessage);
       }
 
-      const appData = await createAppResponse.json();
-      console.log('Heroku app created:', appData.name);
+      const setupData = await setupResponse.json();
+      console.log('App setup created:', setupData.id);
+      console.log('App name:', setupData.app.name);
+      console.log('Build ID:', setupData.build?.id);
+      console.log('Setup status:', setupData.status);
+      console.log('Build output URL:', setupData.build?.output_stream_url);
 
-      // Set config vars
-      if (configVars && Object.keys(configVars).length > 0) {
-        console.log('Setting config vars:', Object.keys(configVars));
-        
-        const configResponse = await fetch(`https://api.heroku.com/apps/${appData.name}/config-vars`, {
-          method: 'PATCH',
-          headers: {
-            'Authorization': `Bearer ${herokuApiKey}`,
-            'Accept': 'application/vnd.heroku+json; version=3',
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify(configVars),
-        });
-
-        if (!configResponse.ok) {
-          const configError = await configResponse.text();
-          console.error('Failed to set config vars:', configError);
-          // Don't throw error, continue with deployment
-        } else {
-          console.log('Config vars set successfully');
-        }
-      } else {
-        console.log('No config vars to set');
-      }
-
-      // Check if repo has app.json (optional, but recommended)
-      console.log('Checking for app.json in repository...');
-      const appJsonUrl = `https://api.github.com/repos/${repoPath}/contents/app.json?ref=${deployBranch}`;
-      try {
-        const appJsonCheck = await fetch(appJsonUrl, {
-          headers: {
-            'Accept': 'application/vnd.github.v3+json',
-            'User-Agent': 'Heroku-Deployment-Service',
-          },
-        });
-
-        if (appJsonCheck.ok) {
-          console.log('✓ app.json found in repository');
-        } else {
-          console.warn('⚠ app.json not found - Heroku will use default buildpack detection');
-          console.warn('Repository should contain package.json for Node.js apps');
-        }
-      } catch (e) {
-        console.warn('Could not check for app.json:', e);
-      }
-
-      // Create build from GitHub using tarball (provides files at root level)
-      console.log(`Starting build from GitHub branch: ${deployBranch}...`);
-      const tarballUrl = `https://api.github.com/repos/${repoPath}/tarball/${deployBranch}`;
-      console.log('Tarball URL:', tarballUrl);
-      
-      const buildResponse = await fetch(`https://api.heroku.com/apps/${appData.name}/builds`, {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${herokuApiKey}`,
-          'Accept': 'application/vnd.heroku+json; version=3',
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          source_blob: {
-            url: tarballUrl,
-            version: deployBranch,
-          },
-        }),
-      });
-
-      if (!buildResponse.ok) {
-        const errorText = await buildResponse.text();
-        console.error('Heroku build failed:', errorText);
-        
-        let errorMessage = 'Failed to start build';
-        try {
-          const errorJson = JSON.parse(errorText);
-          if (errorJson.message) {
-            errorMessage = errorJson.message;
-          }
-        } catch (e) {
-          errorMessage = errorText;
-        }
-        
-        throw new Error(errorMessage);
-      }
-
-      const buildData = await buildResponse.json();
-      console.log('Build started:', buildData.id);
-      console.log('Build status:', buildData.status);
-      console.log('Build output stream URL:', buildData.output_stream_url);
-
-      // Create deployment record with build output URL
+      // Create deployment record
       const { data: deploymentData, error: deployError } = await serviceClient
         .from('deployments')
         .insert({
           user_id: user.id,
           app_template_id: templateId,
           status: 'pending',
-          heroku_app_url: `https://${appData.name}.herokuapp.com`,
-          heroku_app_name: appData.name,
-          build_log_url: buildData.output_stream_url,
+          heroku_app_url: `https://${setupData.app.name}.herokuapp.com`,
+          heroku_app_name: setupData.app.name,
+          build_log_url: setupData.build?.output_stream_url || null,
         })
         .select()
         .single();
@@ -282,9 +212,10 @@ Deno.serve(async (req) => {
       return new Response(
         JSON.stringify({
           success: true,
-          appName: appData.name,
-          appUrl: `https://${appData.name}.herokuapp.com`,
-          buildId: buildData.id,
+          appName: setupData.app.name,
+          appUrl: `https://${setupData.app.name}.herokuapp.com`,
+          setupId: setupData.id,
+          buildId: setupData.build?.id || null,
           deploymentId: deploymentData.id,
         }),
         {
