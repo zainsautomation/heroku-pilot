@@ -21,6 +21,9 @@ export default function BuildLogs() {
   const [appUrl, setAppUrl] = useState<string>('');
   const [buildLogUrl, setBuildLogUrl] = useState<string>('');
   const [polling, setPolling] = useState(true);
+  const [appLogs, setAppLogs] = useState<string>('');
+  const [showAppLogs, setShowAppLogs] = useState(false);
+  const [loadingAppLogs, setLoadingAppLogs] = useState(false);
 
   useEffect(() => {
     if (!deploymentId || !appName) {
@@ -159,6 +162,30 @@ export default function BuildLogs() {
     return <Loader2 className="h-5 w-5 animate-spin" />;
   };
 
+  const fetchAppLogs = async () => {
+    if (!appName) return;
+    
+    setLoadingAppLogs(true);
+    try {
+      const { data, error } = await supabase.functions.invoke(
+        `heroku-deploy?action=logs&appName=${appName}&lines=200`
+      );
+
+      if (error) throw error;
+      
+      if (data && data.logs) {
+        setAppLogs(data.logs);
+        setShowAppLogs(true);
+      }
+    } catch (error: any) {
+      console.error('Error fetching app logs:', error);
+      toast.error('Failed to fetch app logs');
+      setAppLogs('Failed to fetch app logs. Please try again.');
+    } finally {
+      setLoadingAppLogs(false);
+    }
+  };
+
   return (
     <div className="min-h-screen bg-background">
       <header className="border-b border-border bg-card/50 backdrop-blur-sm sticky top-0 z-10">
@@ -184,18 +211,31 @@ export default function BuildLogs() {
                 <div>
                   <CardTitle className="flex items-center gap-2">
                     {getStatusIcon()}
-                    Build Status
+                    {showAppLogs ? 'Application Logs' : 'Build Logs'}
                   </CardTitle>
                   <CardDescription>App: {appName}</CardDescription>
                 </div>
-                <Badge variant={getStatusColor() as any} className="text-base px-4 py-2">
-                  {buildStatus}
-                </Badge>
+                <div className="flex items-center gap-2">
+                  {(buildStatus === 'success' || buildStatus === 'succeeded') && (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setShowAppLogs(!showAppLogs)}
+                    >
+                      {showAppLogs ? 'Show Build Logs' : 'Show App Logs'}
+                    </Button>
+                  )}
+                  <Badge variant={getStatusColor() as any} className="text-base px-4 py-2">
+                    {buildStatus}
+                  </Badge>
+                </div>
               </div>
             </CardHeader>
             <CardContent>
               <ScrollArea className="h-96 w-full rounded-md border bg-muted/50 p-4">
-                <pre className="text-sm font-mono whitespace-pre-wrap">{logs}</pre>
+                <pre className="text-sm font-mono whitespace-pre-wrap">
+                  {showAppLogs ? (appLogs || 'Loading app logs...') : logs}
+                </pre>
               </ScrollArea>
             </CardContent>
           </Card>
@@ -216,10 +256,18 @@ export default function BuildLogs() {
                     View App
                   </Button>
                   <Button 
-                    onClick={() => window.open(`https://dashboard.heroku.com/apps/${appName}/logs`, '_blank')}
+                    onClick={fetchAppLogs}
                     variant="outline"
+                    disabled={loadingAppLogs}
                   >
-                    View Heroku Logs
+                    {loadingAppLogs ? (
+                      <>
+                        <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                        Loading Logs
+                      </>
+                    ) : (
+                      'View App Logs'
+                    )}
                   </Button>
                 </div>
                 <div className="text-sm text-muted-foreground">

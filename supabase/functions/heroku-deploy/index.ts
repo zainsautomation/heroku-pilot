@@ -318,6 +318,57 @@ Deno.serve(async (req) => {
           headers: { ...corsHeaders, 'Content-Type': 'application/json' },
         }
       );
+    } else if (action === 'logs') {
+      const appName = url.searchParams.get('appName');
+      const lines = url.searchParams.get('lines') || '100';
+      
+      if (!appName) {
+        throw new Error('App name required');
+      }
+
+      console.log('Fetching app logs for:', appName);
+
+      // Create a log session to get app logs
+      const logSessionResponse = await fetch(`https://api.heroku.com/apps/${appName}/log-sessions`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${herokuApiKey}`,
+          'Accept': 'application/vnd.heroku+json; version=3',
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          lines: parseInt(lines),
+          tail: true,
+        }),
+      });
+
+      if (!logSessionResponse.ok) {
+        if (logSessionResponse.status === 404) {
+          return new Response(
+            JSON.stringify({ logs: 'App not found or has been deleted.' }),
+            {
+              headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+            }
+          );
+        }
+        const error = await logSessionResponse.text();
+        console.error('Failed to create log session:', error);
+        throw new Error('Failed to fetch app logs');
+      }
+
+      const logSession = await logSessionResponse.json();
+      const logUrl = logSession.logplex_url;
+
+      // Fetch logs from the log URL
+      const logsResponse = await fetch(logUrl);
+      const logsText = await logsResponse.text();
+
+      return new Response(
+        JSON.stringify({ logs: logsText || 'No logs available yet.' }),
+        {
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        }
+      );
     }
 
     throw new Error('Invalid action');
