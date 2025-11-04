@@ -116,7 +116,8 @@ export default function Dashboard() {
       }
       if (deploymentsRes.data) {
         setDeployments(deploymentsRes.data);
-        const used = deploymentsRes.data.filter(d => d.status === 'success').length;
+        // Count all active deployments (success and pending) towards the limit
+        const used = deploymentsRes.data.filter(d => d.status === 'success' || d.status === 'pending').length;
         setDeploymentLimit(prev => ({ ...prev, used }));
       }
       if (limitRes.data) {
@@ -198,6 +199,12 @@ export default function Dashboard() {
   const handleDeploy = async () => {
     if (!selectedTemplate || deploying) return;
 
+    // Check deployment limit before proceeding
+    if (!canDeploy) {
+      toast.error(limitMessage || 'You have reached your deployment limit');
+      return;
+    }
+
     try {
       // Validate app name
       appNameSchema.parse(appName);
@@ -256,6 +263,9 @@ export default function Dashboard() {
       setConfigVars({});
       setAppName('');
       
+      // Refresh data to update deployment count
+      fetchData();
+      
       // Redirect to build logs page
       navigate(`/build-logs?id=${response.data.deploymentId}&appName=${response.data.appName}`);
     } catch (error: any) {
@@ -276,9 +286,13 @@ export default function Dashboard() {
             body: { appName: herokuAppName },
           });
 
-          if (response.error) {
-            console.error('Failed to delete from Heroku:', response.error);
+          if (response.error || response.data?.error) {
+            console.error('Failed to delete from Heroku:', response.error || response.data?.error);
+            toast.error('Failed to delete app from Heroku');
+            return;
           }
+          
+          toast.success('App deleted from Heroku');
         }
       }
 
@@ -286,8 +300,8 @@ export default function Dashboard() {
       const { error } = await supabase.from('deployments').delete().eq('id', deploymentId);
       if (error) throw error;
       
-      toast.success('Deployment deleted');
-      fetchData();
+      toast.success('Deployment removed from history');
+      fetchData(); // This will update the deployment count
     } catch (error: any) {
       console.error('Error deleting deployment:', error);
       toast.error(error.message || 'Failed to delete deployment');
