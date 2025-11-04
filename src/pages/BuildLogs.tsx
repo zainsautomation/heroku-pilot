@@ -30,10 +30,12 @@ export default function BuildLogs() {
     }
 
     fetchDeploymentInfo();
-    const interval = setInterval(pollBuildStatus, 3000);
+    const interval = polling ? setInterval(pollBuildStatus, 3000) : null;
 
-    return () => clearInterval(interval);
-  }, [deploymentId, appName]);
+    return () => {
+      if (interval) clearInterval(interval);
+    };
+  }, [deploymentId, appName, polling]);
 
   const fetchDeploymentInfo = async () => {
     try {
@@ -86,6 +88,8 @@ export default function BuildLogs() {
   };
 
   const pollBuildStatus = async () => {
+    if (!polling) return; // Stop if already marked as not polling
+    
     try {
       const { data, error } = await supabase.functions.invoke(
         `heroku-deploy?action=status&appName=${appName}`
@@ -97,6 +101,7 @@ export default function BuildLogs() {
         const status = data.status;
         const logUrl = data.buildLogUrl;
         
+        const previousStatus = buildStatus;
         setBuildStatus(status);
 
         // Fetch real build logs if URL is available
@@ -105,7 +110,7 @@ export default function BuildLogs() {
           await fetchHerokuBuildLogs(logUrl);
         }
 
-        if (status === 'succeeded') {
+        if (status === 'succeeded' && previousStatus !== 'succeeded' && previousStatus !== 'success') {
           await supabase
             .from('deployments')
             .update({ status: 'success' })
@@ -113,7 +118,7 @@ export default function BuildLogs() {
           
           setPolling(false);
           toast.success('Deployment successful!');
-        } else if (status === 'failed') {
+        } else if (status === 'failed' && previousStatus !== 'failed') {
           // Fetch final logs one more time to show the error
           if (logUrl) {
             await fetchHerokuBuildLogs(logUrl);
