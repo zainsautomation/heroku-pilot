@@ -53,30 +53,35 @@ Deno.serve(async (req) => {
     const url = new URL(req.url);
     const action = url.searchParams.get('action') || 'create'; // Default to 'create' if no action
 
-    // Get Heroku API key from system_settings (using service role to bypass RLS)
-    const { data: settingData, error: settingError } = await serviceClient
-      .from('system_settings')
-      .select('setting_value')
-      .eq('setting_key', 'heroku_api_key')
-      .maybeSingle();
+    // Get Heroku API key - prefer environment variable (secure), fallback to database
+    let herokuApiKey = Deno.env.get('HEROKU_API_KEY');
+    
+    if (!herokuApiKey) {
+      console.warn('HEROKU_API_KEY not found in secrets, using database fallback (insecure)');
+      const { data: settingData, error: settingError } = await serviceClient
+        .from('system_settings')
+        .select('setting_value')
+        .eq('setting_key', 'heroku_api_key')
+        .maybeSingle();
 
-    if (settingError) {
-      console.error('Error fetching Heroku API key:', settingError);
-      throw new Error('Failed to retrieve Heroku API key from database.');
+      if (settingError) {
+        console.error('Error fetching Heroku API key:', settingError);
+        throw new Error('Configuration error');
+      }
+
+      if (!settingData || !settingData.setting_value) {
+        throw new Error('Heroku API key not configured');
+      }
+
+      herokuApiKey = settingData.setting_value.trim();
     }
-
-    if (!settingData || !settingData.setting_value) {
-      throw new Error('Heroku API key not configured. Please contact admin.');
-    }
-
-    const herokuApiKey = settingData.setting_value.trim();
     
     // Validate API key format
     if (!herokuApiKey || herokuApiKey.length < 20) {
-      throw new Error('Invalid Heroku API key format. Please contact admin to update the API key.');
+      throw new Error('Configuration error');
     }
     
-    console.log('Using Heroku API key (first 10 chars):', herokuApiKey.substring(0, 10) + '...');
+    console.log('Heroku API key loaded successfully');
 
     if (action === 'create') {
       const { templateId, configVars, appName: customAppName, branch }: DeployRequest = await req.json();
@@ -85,6 +90,42 @@ Deno.serve(async (req) => {
       console.log('Config vars:', configVars);
       console.log('Custom app name:', customAppName);
       console.log('Branch:', branch || 'auto-detect');
+
+      // SERVER-SIDE DEPLOYMENT LIMIT CHECK
+      console.log('Checking deployment limit for user:', user.id);
+      
+      // Fetch user's deployment limit
+      const { data: limitData, error: limitError } = await serviceClient
+        .from('deployment_limits')
+        .select('max_deployments')
+        .eq('user_id', user.id)
+        .single();
+
+      if (limitError) {
+        console.error('Error fetching deployment limit:', limitError);
+        throw new Error('Unable to verify deployment limit');
+      }
+
+      // Count existing active deployments (success and pending)
+      const { data: existingDeployments, error: deploymentsError } = await serviceClient
+        .from('deployments')
+        .select('id')
+        .eq('user_id', user.id)
+        .in('status', ['success', 'pending']);
+
+      if (deploymentsError) {
+        console.error('Error fetching deployments:', deploymentsError);
+        throw new Error('Unable to verify existing deployments');
+      }
+
+      const currentDeploymentCount = existingDeployments?.length || 0;
+      console.log(`User has ${currentDeploymentCount}/${limitData.max_deployments} deployments`);
+
+      // Enforce deployment limit
+      if (currentDeploymentCount >= limitData.max_deployments) {
+        console.log('User has reached deployment limit');
+        throw new Error('Deployment limit reached');
+      }
 
       // Get template info
       const { data: template, error: templateError } = await serviceClient
