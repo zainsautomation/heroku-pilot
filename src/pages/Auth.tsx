@@ -111,7 +111,7 @@ export default function Auth() {
             </div>
           </div>
           <CardTitle className="text-3xl font-bold"> Auto Pilot</CardTitle>
-          <CardDescription>Deploy apps with ease and control by Dark Heart</CardDescription>
+          <CardDescription>Deploy apps with ease and control, Powered by Dark Heart</CardDescription>
         </CardHeader>
         
         <CardContent>
