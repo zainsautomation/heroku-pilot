@@ -209,6 +209,10 @@ export type Database = {
         }
         Returns: boolean
       }
+      reserve_deployment: {
+        Args: { _template_id: string; _user_id: string }
+        Returns: string
+      }
     }
     Enums: {
       app_role: "admin" | "moderator" | "user"
