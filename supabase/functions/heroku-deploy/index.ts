@@ -22,6 +22,8 @@ Deno.serve(async (req) => {
     return new Response(null, { headers: corsHeaders });
   }
 
+  let reservedDeploymentId: string | null = null;
+
   try {
     // Create Supabase client for user authentication
     const authClient = createClient(
@@ -47,8 +49,6 @@ Deno.serve(async (req) => {
       console.error('Auth error:', userError);
       throw new Error('Unauthorized');
     }
-
-    console.log('Authenticated user:', user.id);
 
     const url = new URL(req.url);
     const action = url.searchParams.get('action') || 'create'; // Default to 'create' if no action
@@ -87,46 +87,6 @@ Deno.serve(async (req) => {
       const { templateId, configVars, appName: customAppName, branch }: DeployRequest = await req.json();
 
       console.log('Creating Heroku deployment for template:', templateId);
-      console.log('Config vars:', configVars);
-      console.log('Custom app name:', customAppName);
-      console.log('Branch:', branch || 'auto-detect');
-
-      // SERVER-SIDE DEPLOYMENT LIMIT CHECK
-      console.log('Checking deployment limit for user:', user.id);
-      
-      // Fetch user's deployment limit
-      const { data: limitData, error: limitError } = await serviceClient
-        .from('deployment_limits')
-        .select('max_deployments')
-        .eq('user_id', user.id)
-        .single();
-
-      if (limitError) {
-        console.error('Error fetching deployment limit:', limitError);
-        throw new Error('Unable to verify deployment limit');
-      }
-
-      // Count existing active deployments (success and pending)
-      const { data: existingDeployments, error: deploymentsError } = await serviceClient
-        .from('deployments')
-        .select('id')
-        .eq('user_id', user.id)
-        .in('status', ['success', 'pending']);
-
-      if (deploymentsError) {
-        console.error('Error fetching deployments:', deploymentsError);
-        throw new Error('Unable to verify existing deployments');
-      }
-
-      const currentDeploymentCount = existingDeployments?.length || 0;
-      console.log(`User has ${currentDeploymentCount}/${limitData.max_deployments} deployments`);
-
-      // Enforce deployment limit
-      if (currentDeploymentCount >= limitData.max_deployments) {
-        console.log('User has reached deployment limit');
-        throw new Error('Deployment limit reached');
-      }
-
       // Get template info
       const { data: template, error: templateError } = await serviceClient
         .from('app_templates')
@@ -138,6 +98,15 @@ Deno.serve(async (req) => {
         console.error('Template error:', templateError);
         throw new Error('Template not found');
       }
+
+      const { data: reservationId, error: reservationError } = await serviceClient.rpc(
+        'reserve_deployment',
+        { _user_id: user.id, _template_id: templateId }
+      );
+      if (reservationError || !reservationId) {
+        throw new Error(reservationError?.message || 'Unable to reserve deployment');
+      }
+      reservedDeploymentId = reservationId;
 
       console.log('Template found:', template.name);
 
@@ -190,8 +159,6 @@ Deno.serve(async (req) => {
         } : undefined,
       };
       
-      console.log('Setup payload:', JSON.stringify(setupPayload, null, 2));
-      
       const setupResponse = await fetch('https://api.heroku.com/app-setups', {
         method: 'POST',
         headers: {
@@ -223,32 +190,20 @@ Deno.serve(async (req) => {
       }
 
       const setupData = await setupResponse.json();
-      console.log('App setup created:', setupData.id);
-      console.log('App name:', setupData.app.name);
-      console.log('Build ID:', setupData.build?.id);
-      console.log('Setup status:', setupData.status);
-      console.log('Build output URL:', setupData.build?.output_stream_url);
-
-      // Create deployment record
-      const { data: deploymentData, error: deployError } = await serviceClient
+      const { error: deployError } = await serviceClient
         .from('deployments')
-        .insert({
-          user_id: user.id,
-          app_template_id: templateId,
+        .update({
           status: 'pending',
           heroku_app_url: `https://${setupData.app.name}.herokuapp.com`,
           heroku_app_name: setupData.app.name,
           build_log_url: setupData.build?.output_stream_url || null,
         })
-        .select()
-        .single();
+        .eq('id', reservedDeploymentId);
 
       if (deployError) {
         console.error('Failed to create deployment record:', deployError);
         throw new Error('Failed to create deployment record');
       }
-
-      console.log('Deployment record created:', deploymentData.id);
 
       return new Response(
         JSON.stringify({
@@ -257,33 +212,45 @@ Deno.serve(async (req) => {
           appUrl: `https://${setupData.app.name}.herokuapp.com`,
           setupId: setupData.id,
           buildId: setupData.build?.id || null,
-          deploymentId: deploymentData.id,
+          deploymentId: reservedDeploymentId,
         }),
         {
           headers: { ...corsHeaders, 'Content-Type': 'application/json' },
         }
       );
     } else if (action === 'delete') {
-      const { appName }: DeleteRequest = await req.json();
+      const { deploymentId } = await req.json();
+      if (typeof deploymentId !== 'string' || !/^[0-9a-f-]{36}$/i.test(deploymentId)) {
+        throw new Error('A valid deployment ID is required');
+      }
+      const { data: deployment, error: deploymentError } = await serviceClient
+        .from('deployments')
+        .select('id, user_id, heroku_app_name')
+        .eq('id', deploymentId)
+        .maybeSingle();
+      if (deploymentError || !deployment) throw new Error('Deployment not found');
+      const { data: isAdmin } = await serviceClient.rpc('has_role', { _user_id: user.id, _role: 'admin' });
+      const { data: isModerator } = await serviceClient.rpc('has_role', { _user_id: user.id, _role: 'moderator' });
+      if (deployment.user_id !== user.id && !isAdmin && !isModerator) throw new Error('Not authorized');
 
-      console.log('Deleting Heroku app:', appName);
+      const appName = deployment.heroku_app_name;
+      if (appName) {
 
-      // Delete app from Heroku
-      const deleteResponse = await fetch(`https://api.heroku.com/apps/${appName}`, {
-        method: 'DELETE',
-        headers: {
-          'Authorization': `Bearer ${herokuApiKey}`,
-          'Accept': 'application/vnd.heroku+json; version=3',
-        },
-      });
+        const deleteResponse = await fetch(`https://api.heroku.com/apps/${appName}`, {
+          method: 'DELETE',
+          headers: {
+            'Authorization': `Bearer ${herokuApiKey}`,
+            'Accept': 'application/vnd.heroku+json; version=3',
+          },
+        });
 
-      if (!deleteResponse.ok && deleteResponse.status !== 404) {
-        const error = await deleteResponse.text();
-        console.error('Heroku app deletion failed:', error);
-        throw new Error(`Failed to delete Heroku app: ${error}`);
+        if (!deleteResponse.ok && deleteResponse.status !== 404) {
+          throw new Error('Failed to delete app from Heroku');
+        }
       }
 
-      console.log('Heroku app deleted successfully');
+      const { error: removeError } = await serviceClient.from('deployments').delete().eq('id', deploymentId);
+      if (removeError) throw new Error('App deleted, but its history could not be removed');
 
       return new Response(
         JSON.stringify({ success: true }),
@@ -292,12 +259,18 @@ Deno.serve(async (req) => {
         }
       );
     } else if (action === 'status') {
-      const appName = url.searchParams.get('appName');
-      if (!appName) {
-        throw new Error('App name required');
-      }
-
-      console.log('Checking build status for app:', appName);
+      const deploymentId = url.searchParams.get('deploymentId');
+      if (!deploymentId || !/^[0-9a-f-]{36}$/i.test(deploymentId)) throw new Error('A valid deployment ID is required');
+      const { data: deployment, error: deploymentError } = await serviceClient
+        .from('deployments')
+        .select('id, user_id, heroku_app_name')
+        .eq('id', deploymentId)
+        .maybeSingle();
+      if (deploymentError || !deployment || !deployment.heroku_app_name) throw new Error('Deployment not found');
+      const { data: isAdmin } = await serviceClient.rpc('has_role', { _user_id: user.id, _role: 'admin' });
+      const { data: isModerator } = await serviceClient.rpc('has_role', { _user_id: user.id, _role: 'moderator' });
+      if (deployment.user_id !== user.id && !isAdmin && !isModerator) throw new Error('Not authorized');
+      const appName = deployment.heroku_app_name;
 
       // Get build status
       const buildsResponse = await fetch(`https://api.heroku.com/apps/${appName}/builds`, {
@@ -346,8 +319,12 @@ Deno.serve(async (req) => {
       }
 
       const latestBuild = builds[0];
-      console.log('Latest build status:', latestBuild.status);
-      console.log('Latest build log URL:', latestBuild.output_stream_url);
+      if (latestBuild.status === 'succeeded' || latestBuild.status === 'failed') {
+        await serviceClient.from('deployments').update({
+          status: latestBuild.status === 'succeeded' ? 'success' : 'failed',
+          error_message: latestBuild.status === 'failed' ? 'Build failed on Heroku' : null,
+        }).eq('id', deploymentId);
+      }
 
       return new Response(
         JSON.stringify({
@@ -360,14 +337,19 @@ Deno.serve(async (req) => {
         }
       );
     } else if (action === 'logs') {
-      const appName = url.searchParams.get('appName');
+      const deploymentId = url.searchParams.get('deploymentId');
       const lines = url.searchParams.get('lines') || '100';
-      
-      if (!appName) {
-        throw new Error('App name required');
-      }
-
-      console.log('Fetching app logs for:', appName);
+      if (!deploymentId || !/^[0-9a-f-]{36}$/i.test(deploymentId)) throw new Error('A valid deployment ID is required');
+      const { data: deployment, error: deploymentError } = await serviceClient
+        .from('deployments')
+        .select('id, user_id, heroku_app_name')
+        .eq('id', deploymentId)
+        .maybeSingle();
+      if (deploymentError || !deployment || !deployment.heroku_app_name) throw new Error('Deployment not found');
+      const { data: isAdmin } = await serviceClient.rpc('has_role', { _user_id: user.id, _role: 'admin' });
+      const { data: isModerator } = await serviceClient.rpc('has_role', { _user_id: user.id, _role: 'moderator' });
+      if (deployment.user_id !== user.id && !isAdmin && !isModerator) throw new Error('Not authorized');
+      const appName = deployment.heroku_app_name;
 
       // Create a log session to get app logs
       const logSessionResponse = await fetch(`https://api.heroku.com/apps/${appName}/log-sessions`, {
@@ -378,8 +360,8 @@ Deno.serve(async (req) => {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          lines: parseInt(lines),
-          tail: true,
+          lines: Math.min(500, Math.max(1, Number.parseInt(lines, 10) || 100)),
+          tail: false,
         }),
       });
 
@@ -392,8 +374,7 @@ Deno.serve(async (req) => {
             }
           );
         }
-        const error = await logSessionResponse.text();
-        console.error('Failed to create log session:', error);
+        console.error('Failed to create log session:', logSessionResponse.status);
         throw new Error('Failed to fetch app logs');
       }
 
@@ -414,10 +395,13 @@ Deno.serve(async (req) => {
 
     throw new Error('Invalid action');
   } catch (error) {
-    console.error('Error occurred:', error);
-    console.error('Error type:', error instanceof Error ? 'Error' : typeof error);
-    console.error('Error message:', error instanceof Error ? error.message : String(error));
-    console.error('Error stack:', error instanceof Error ? error.stack : 'No stack trace');
+    console.error('Deployment operation failed');
+    if (reservedDeploymentId) {
+      await serviceClient.from('deployments').update({
+        status: 'failed',
+        error_message: error instanceof Error ? error.message.slice(0, 500) : 'Deployment failed',
+      }).eq('id', reservedDeploymentId);
+    }
     
     const errorMessage = error instanceof Error ? error.message : 'Unknown error';
     return new Response(
