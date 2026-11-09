@@ -9,7 +9,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { toast } from 'sonner';
-import { Rocket, Github, LogOut, History, AlertCircle, Trash2, ExternalLink } from 'lucide-react';
+import { Rocket, Github, LogOut, History, AlertCircle, Trash2, ExternalLink, Shield } from 'lucide-react';
 import { ThemeToggle } from '@/components/ThemeToggle';
 import {
   Dialog,
@@ -24,9 +24,8 @@ import { z } from 'zod';
 
 const configVarSchema = z.record(z.string().max(2000, 'Configuration value is too long').trim());
 const appNameSchema = z.string()
-  .min(1, 'App name is required')
-  .max(30, 'App name must be 30 characters or less')
-  .regex(/^[a-z0-9-]+$/, 'App name must be lowercase letters, numbers, and hyphens only');
+  .max(16, 'Use 16 characters or fewer; a unique suffix is added automatically')
+  .regex(/^[a-z0-9-]*$/, 'App name must be lowercase letters, numbers, and hyphens only');
 
 interface ConfigVarMetadata {
   name: string;
@@ -63,7 +62,7 @@ export default function Dashboard() {
   const navigate = useNavigate();
   const [templates, setTemplates] = useState<AppTemplate[]>([]);
   const [deployments, setDeployments] = useState<Deployment[]>([]);
-  const [deploymentLimit, setDeploymentLimit] = useState({ used: 0, max: 5 });
+  const [deploymentLimit, setDeploymentLimit] = useState({ used: 0, max: 0 });
   const [loading, setLoading] = useState(true);
   const [selectedTemplate, setSelectedTemplate] = useState<AppTemplate | null>(null);
   const [deploying, setDeploying] = useState(false);
@@ -101,10 +100,13 @@ export default function Dashboard() {
     try {
       const [templatesRes, deploymentsRes, limitRes, settingsRes] = await Promise.all([
         supabase.from('app_templates').select('*').order('created_at', { ascending: false }),
-        supabase.from('deployments').select('*, app_templates(name)').eq('user_id', user!.id).order('created_at', { ascending: false }),
-        supabase.from('deployment_limits').select('*').eq('user_id', user!.id).maybeSingle(),
+        supabase.from('deployments').select('*, app_templates(name)').eq('user_id', user?.id || '').order('created_at', { ascending: false }),
+        supabase.from('deployment_limits').select('*').eq('user_id', user?.id || '').maybeSingle(),
         supabase.from('system_settings').select('*').eq('setting_key', 'limit_reached_message').maybeSingle(),
       ]);
+
+      const failedRequest = [templatesRes.error, deploymentsRes.error, limitRes.error, settingsRes.error].find(Boolean);
+      if (failedRequest) throw failedRequest;
 
       if (templatesRes.data) {
         setTemplates(templatesRes.data.map(t => ({
@@ -207,7 +209,7 @@ export default function Dashboard() {
 
     try {
       // Validate app name
-      appNameSchema.parse(appName);
+      appNameSchema.parse(appName.trim());
       
       // Validate config vars
       configVarSchema.parse(configVars);
@@ -283,7 +285,7 @@ export default function Dashboard() {
         const { data: { session } } = await supabase.auth.getSession();
         if (session) {
           const response = await supabase.functions.invoke('heroku-deploy?action=delete', {
-            body: { appName: herokuAppName },
+          body: { deploymentId },
           });
 
           if (response.error || response.data?.error) {
@@ -338,6 +340,11 @@ export default function Dashboard() {
             </div>
             
             <div className="flex items-center gap-1 sm:gap-2">
+              {(role === 'admin' || role === 'moderator') && (
+                <Button variant="outline" size="sm" onClick={() => navigate('/admin')} className="hidden sm:flex">
+                  <Shield className="mr-2 h-4 w-4" /> Admin
+                </Button>
+              )}
               <Button 
                 variant="outline" 
                 size="sm"
@@ -497,7 +504,7 @@ export default function Dashboard() {
                   onChange={(e) => setAppName(e.target.value)}
                 />
                 <p className="text-xs text-muted-foreground">
-                  Leave empty to auto-generate. A timestamp will be added automatically.
+                  Leave empty to generate a unique name automatically. We add a short suffix.
                 </p>
               </div>
 
@@ -616,6 +623,8 @@ export default function Dashboard() {
                       <Button
                         variant="ghost"
                         size="sm"
+                        aria-label={`Delete Heroku app ${deployment.heroku_app_name || deployment.app_templates?.name || 'deployment'}`}
+                        title="Delete this deployed app from Heroku and remove its history"
                         onClick={() => handleDeleteDeployment(deployment.id, deployment.heroku_app_name || null)}
                       >
                         <Trash2 className="h-4 w-4 text-destructive" />
