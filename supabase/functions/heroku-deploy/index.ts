@@ -12,10 +12,6 @@ interface DeployRequest {
   branch?: string;
 }
 
-interface DeleteRequest {
-  appName: string;
-}
-
 Deno.serve(async (req) => {
   // Handle CORS preflight requests
   if (req.method === 'OPTIONS') {
@@ -23,6 +19,10 @@ Deno.serve(async (req) => {
   }
 
   let reservedDeploymentId: string | null = null;
+  const serviceClient = createClient(
+    Deno.env.get('SUPABASE_URL') ?? '',
+    Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
+  );
 
   try {
     // Create Supabase client for user authentication
@@ -36,12 +36,6 @@ Deno.serve(async (req) => {
       }
     );
 
-    // Create separate service role client for database access (bypasses RLS)
-    const serviceClient = createClient(
-      Deno.env.get('SUPABASE_URL') ?? '',
-      Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
-    );
-
     // Verify user authentication
     const { data: { user }, error: userError } = await authClient.auth.getUser();
 
@@ -53,40 +47,24 @@ Deno.serve(async (req) => {
     const url = new URL(req.url);
     const action = url.searchParams.get('action') || 'create'; // Default to 'create' if no action
 
-    // Get Heroku API key - prefer environment variable (secure), fallback to database
-    let herokuApiKey = Deno.env.get('HEROKU_API_KEY');
-    
-    if (!herokuApiKey) {
-      console.warn('HEROKU_API_KEY not found in secrets, using database fallback (insecure)');
-      const { data: settingData, error: settingError } = await serviceClient
-        .from('system_settings')
-        .select('setting_value')
-        .eq('setting_key', 'heroku_api_key')
-        .maybeSingle();
-
-      if (settingError) {
-        console.error('Error fetching Heroku API key:', settingError);
-        throw new Error('Configuration error');
-      }
-
-      if (!settingData || !settingData.setting_value) {
-        throw new Error('Heroku API key not configured');
-      }
-
-      herokuApiKey = settingData.setting_value.trim();
-    }
+    const herokuApiKey = Deno.env.get('HEROKU_API_KEY');
     
     // Validate API key format
     if (!herokuApiKey || herokuApiKey.length < 20) {
       throw new Error('Configuration error');
     }
     
-    console.log('Heroku API key loaded successfully');
+    if (!herokuApiKey) throw new Error('Heroku connection is not configured securely yet.');
 
     if (action === 'create') {
       const { templateId, configVars, appName: customAppName, branch }: DeployRequest = await req.json();
 
-      console.log('Creating Heroku deployment for template:', templateId);
+      if (typeof templateId !== 'string' || !/^[0-9a-f-]{36}$/i.test(templateId)) {
+        throw new Error('A valid app template is required');
+      }
+      if (!configVars || typeof configVars !== 'object' || Array.isArray(configVars)) {
+        throw new Error('Invalid app settings');
+      }
       // Get template info
       const { data: template, error: templateError } = await serviceClient
         .from('app_templates')
@@ -171,7 +149,7 @@ Deno.serve(async (req) => {
 
       if (!setupResponse.ok) {
         const errorText = await setupResponse.text();
-        console.error('Heroku app setup failed:', errorText);
+        console.error('Heroku app setup failed with status:', setupResponse.status);
         let errorMessage = 'Failed to create Heroku app setup';
         
         try {
@@ -182,9 +160,7 @@ Deno.serve(async (req) => {
           if (errorJson.id === 'unauthorized') {
             errorMessage = 'Invalid Heroku API key. Please contact admin to update the API key.';
           }
-        } catch (e) {
-          errorMessage = errorText;
-        }
+        } catch { /* Keep the safe fallback message. */ }
         
         throw new Error(errorMessage);
       }

@@ -33,7 +33,7 @@ export default function BuildLogs() {
     }
 
     fetchDeploymentInfo();
-    const interval = polling ? setInterval(pollBuildStatus, 3000) : null;
+    const interval = polling ? setInterval(pollBuildStatus, 5000) : null;
 
     return () => {
       if (interval) clearInterval(interval);
@@ -60,7 +60,7 @@ export default function BuildLogs() {
           await fetchHerokuBuildLogs(data.build_log_url);
         }
         
-        if (data.status === 'success' || data.status === 'failed') {
+        if (data.status === 'success' || data.status === 'succeeded' || data.status === 'failed') {
           setPolling(false);
         }
       }
@@ -95,7 +95,7 @@ export default function BuildLogs() {
     
     try {
       const { data, error } = await supabase.functions.invoke(
-        `heroku-deploy?action=status&appName=${appName}`
+        `heroku-deploy?action=status&deploymentId=${deploymentId}`
       );
 
       if (error) throw error;
@@ -114,11 +114,6 @@ export default function BuildLogs() {
         }
 
         if (status === 'succeeded' && previousStatus !== 'succeeded' && previousStatus !== 'success') {
-          await supabase
-            .from('deployments')
-            .update({ status: 'success' })
-            .eq('id', deploymentId);
-          
           setPolling(false);
           toast.success('Deployment successful!');
         } else if (status === 'failed' && previousStatus !== 'failed') {
@@ -127,19 +122,9 @@ export default function BuildLogs() {
             await fetchHerokuBuildLogs(logUrl);
           }
           
-          await supabase
-            .from('deployments')
-            .update({ status: 'failed', error_message: 'Build failed on Heroku' })
-            .eq('id', deploymentId);
-          
           setPolling(false);
           toast.error('Deployment failed');
         } else if (status === 'deleted') {
-          await supabase
-            .from('deployments')
-            .update({ status: 'failed', error_message: 'App was deleted from Heroku' })
-            .eq('id', deploymentId);
-          
           setPolling(false);
           setLogs('App was deleted from Heroku. The deployment no longer exists.');
           toast.error('App was deleted from Heroku');
@@ -163,12 +148,12 @@ export default function BuildLogs() {
   };
 
   const fetchAppLogs = async () => {
-    if (!appName) return;
+    if (!deploymentId) return;
     
     setLoadingAppLogs(true);
     try {
       const { data, error } = await supabase.functions.invoke(
-        `heroku-deploy?action=logs&appName=${appName}&lines=200`
+        `heroku-deploy?action=logs&deploymentId=${deploymentId}&lines=200`
       );
 
       if (error) throw error;
@@ -189,14 +174,14 @@ export default function BuildLogs() {
   return (
     <div className="min-h-screen bg-background">
       <header className="border-b border-border bg-card/50 backdrop-blur-sm sticky top-0 z-10">
-        <div className="container mx-auto px-4 py-4">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-4">
-              <Button variant="ghost" size="sm" onClick={() => navigate('/dashboard')}>
+        <div className="container mx-auto px-4 py-3 sm:py-4">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="flex min-w-0 flex-wrap items-center gap-2 sm:gap-4">
+              <Button variant="ghost" size="sm" onClick={() => navigate('/dashboard')} className="shrink-0">
                 <ArrowLeft className="h-4 w-4 mr-2" />
-                Back to Dashboard
+                <span className="hidden sm:inline">Back to Dashboard</span><span className="sm:hidden">Back</span>
               </Button>
-              <h1 className="text-2xl font-bold">Build Logs</h1>
+              <h1 className="text-xl font-bold sm:text-2xl">Build Logs</h1>
             </div>
             <ThemeToggle />
           </div>
@@ -207,15 +192,15 @@ export default function BuildLogs() {
         <div className="max-w-4xl mx-auto space-y-6">
           <Card>
             <CardHeader>
-              <div className="flex items-center justify-between">
-                <div>
-                  <CardTitle className="flex items-center gap-2">
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                <div className="min-w-0">
+                  <CardTitle className="flex min-w-0 items-center gap-2 break-words">
                     {getStatusIcon()}
                     {showAppLogs ? 'Application Logs' : 'Build Logs'}
                   </CardTitle>
                   <CardDescription>App: {appName}</CardDescription>
                 </div>
-                <div className="flex items-center gap-2">
+                <div className="flex flex-wrap items-center gap-2">
                   {(buildStatus === 'success' || buildStatus === 'succeeded') && (
                     <Button
                       variant="outline"
@@ -232,8 +217,8 @@ export default function BuildLogs() {
               </div>
             </CardHeader>
             <CardContent>
-              <ScrollArea className="h-96 w-full rounded-md border bg-muted/50 p-4">
-                <pre className="text-sm font-mono whitespace-pre-wrap">
+              <ScrollArea className="h-[55dvh] min-h-64 max-h-96 w-full rounded-md border bg-muted/50 p-3 sm:p-4">
+                <pre className="break-all whitespace-pre-wrap font-mono text-xs sm:text-sm">
                   {showAppLogs ? (appLogs || 'Loading app logs...') : logs}
                 </pre>
               </ScrollArea>
@@ -247,7 +232,7 @@ export default function BuildLogs() {
                 <CardDescription>Click below to view your deployed application</CardDescription>
               </CardHeader>
               <CardContent className="space-y-4">
-                <div className="flex gap-2">
+                <div className="flex flex-col gap-2 sm:flex-row">
                   <Button 
                     onClick={() => window.open(appUrl, '_blank')}
                     className="flex-1"
@@ -270,8 +255,8 @@ export default function BuildLogs() {
                     )}
                   </Button>
                 </div>
-                <div className="text-sm text-muted-foreground">
-                  <p>App URL: <code className="bg-muted px-2 py-1 rounded">{appUrl}</code></p>
+                <div className="min-w-0 text-sm text-muted-foreground">
+                  <p className="break-all">App URL: <code className="rounded bg-muted px-2 py-1">{appUrl}</code></p>
                 </div>
               </CardContent>
             </Card>
