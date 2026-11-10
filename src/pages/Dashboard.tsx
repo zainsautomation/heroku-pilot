@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useAuth } from '@/hooks/useAuth';
 import { supabase } from '@/integrations/supabase/client';
 import { useNavigate } from 'react-router-dom';
@@ -72,6 +72,7 @@ export default function Dashboard() {
   const [showConfigDialog, setShowConfigDialog] = useState(false);
   const [appName, setAppName] = useState('');
   const [pollingDeployments, setPollingDeployments] = useState<Set<string>>(new Set());
+  const pollingInFlight = useRef(new Set<string>());
 
   useEffect(() => {
     if (user) {
@@ -94,7 +95,7 @@ export default function Dashboard() {
     }, 5000);
 
     return () => clearInterval(pollInterval);
-  }, [deployments]);
+  }, [deployments, pollingDeployments]);
 
   const fetchData = async () => {
     try {
@@ -137,15 +138,15 @@ export default function Dashboard() {
   };
 
   const pollBuildStatus = async (deploymentId: string, appName: string) => {
-    if (pollingDeployments.has(deploymentId)) return;
-
+    if (pollingInFlight.current.has(deploymentId)) return;
+    pollingInFlight.current.add(deploymentId);
     setPollingDeployments(prev => new Set(prev).add(deploymentId));
 
     try {
       const { data: { session } } = await supabase.auth.getSession();
       if (!session) return;
 
-      const response = await supabase.functions.invoke(`heroku-deploy?action=status&appName=${appName}`, {
+      const response = await supabase.functions.invoke(`heroku-deploy?action=status&deploymentId=${deploymentId}`, {
         headers: {
           Authorization: `Bearer ${session.access_token}`,
         },
@@ -156,40 +157,21 @@ export default function Dashboard() {
         return;
       }
 
-      const { status } = response.data;
+      const { status } = response.data || {};
 
-      if (status === 'succeeded') {
-        await supabase
-          .from('deployments')
-          .update({ status: 'success' })
-          .eq('id', deploymentId);
-        
+      if (status === 'succeeded' || status === 'success') {
         toast.success(`Deployment ${appName} completed successfully!`);
         fetchData();
-        setPollingDeployments(prev => {
-          const next = new Set(prev);
-          next.delete(deploymentId);
-          return next;
-        });
       } else if (status === 'failed') {
-        await supabase
-          .from('deployments')
-          .update({ 
-            status: 'failed',
-            error_message: 'Build failed on Heroku'
-          })
-          .eq('id', deploymentId);
-        
         toast.error(`Deployment ${appName} failed!`);
         fetchData();
-        setPollingDeployments(prev => {
-          const next = new Set(prev);
-          next.delete(deploymentId);
-          return next;
-        });
+      } else if (status === 'deleted') {
+        fetchData();
       }
     } catch (error) {
       console.error('Error polling build status:', error);
+    } finally {
+      pollingInFlight.current.delete(deploymentId);
       setPollingDeployments(prev => {
         const next = new Set(prev);
         next.delete(deploymentId);
@@ -279,30 +261,13 @@ export default function Dashboard() {
   };
 
   const handleDeleteDeployment = async (deploymentId: string, herokuAppName: string | null) => {
+    if (!window.confirm(`Delete ${herokuAppName || 'this deployment'} from Heroku and remove its history? This cannot be undone.`)) return;
     try {
-      // Delete from Heroku if app name exists
-      if (herokuAppName) {
-        const { data: { session } } = await supabase.auth.getSession();
-        if (session) {
-          const response = await supabase.functions.invoke('heroku-deploy?action=delete', {
-          body: { deploymentId },
-          });
-
-          if (response.error || response.data?.error) {
-            console.error('Failed to delete from Heroku:', response.error || response.data?.error);
-            toast.error('Failed to delete app from Heroku');
-            return;
-          }
-          
-          toast.success('App deleted from Heroku');
-        }
-      }
-
-      // Delete from database
-      const { error } = await supabase.from('deployments').delete().eq('id', deploymentId);
-      if (error) throw error;
-      
-      toast.success('Deployment removed from history');
+      const response = await supabase.functions.invoke('heroku-deploy?action=delete', {
+        body: { deploymentId },
+      });
+      if (response.error || response.data?.error) throw new Error(response.data?.error || response.error?.message || 'Could not delete app');
+      toast.success('App and deployment history deleted');
       fetchData(); // This will update the deployment count
     } catch (error: any) {
       console.error('Error deleting deployment:', error);
@@ -345,6 +310,11 @@ export default function Dashboard() {
                   <Shield className="mr-2 h-4 w-4" /> Admin
                 </Button>
               )}
+              {(role === 'admin' || role === 'moderator') && (
+                <Button variant="outline" size="icon" aria-label="Open admin dashboard" title="Admin dashboard" onClick={() => navigate('/admin')} className="sm:hidden">
+                  <Shield className="h-4 w-4" />
+                </Button>
+              )}
               <Button 
                 variant="outline" 
                 size="sm"
@@ -357,6 +327,8 @@ export default function Dashboard() {
               <Button 
                 variant="outline" 
                 size="icon"
+                aria-label="Open deployment history"
+                title="Deployment history"
                 onClick={() => setShowHistory(true)}
                 className="sm:hidden"
               >
@@ -375,6 +347,8 @@ export default function Dashboard() {
               <Button 
                 variant="outline" 
                 size="icon"
+                aria-label="Sign out"
+                title="Sign out"
                 onClick={signOut}
                 className="sm:hidden"
               >
@@ -482,7 +456,7 @@ export default function Dashboard() {
           setAppName('');
         }
       }}>
-        <DialogContent className="max-w-2xl">
+                <DialogContent className="max-h-[90dvh] w-[calc(100%-1rem)] max-w-2xl overflow-y-auto p-4 sm:p-6">
           <DialogHeader>
             <DialogTitle>Configure Deployment</DialogTitle>
             <DialogDescription>

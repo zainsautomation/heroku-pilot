@@ -7,7 +7,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { toast } from 'sonner';
-import { Rocket, LogOut, Plus, Users, Package, Settings, BarChart, Key, Download, Check, X, Loader2, Trash2, Search } from 'lucide-react';
+import { Rocket, LogOut, Plus, Users, Package, Settings, BarChart, Download, Check, X, Loader2, Trash2, Search, Shield } from 'lucide-react';
 import { ThemeToggle } from '@/components/ThemeToggle';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { z } from 'zod';
@@ -103,12 +103,9 @@ export default function Admin() {
   
   const [selectedUser, setSelectedUser] = useState<UserData | null>(null);
   const [newLimit, setNewLimit] = useState('');
-  const [herokuApiKey, setHerokuApiKey] = useState('');
-  const [showHerokuKey, setShowHerokuKey] = useState(false);
   const [fetchingConfig, setFetchingConfig] = useState(false);
   const [detectedVars, setDetectedVars] = useState<ConfigVarMetadata[]>([]);
   const [showVarsDialog, setShowVarsDialog] = useState(false);
-  const [testingApiKey, setTestingApiKey] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [deletingUser, setDeletingUser] = useState<string | null>(null);
 
@@ -118,14 +115,15 @@ export default function Admin() {
 
   const fetchData = async () => {
     try {
-      const [usersRes, templatesRes, deploymentsRes, settingsRes, herokuKeyRes] = await Promise.all([
+      const [usersRes, templatesRes, deploymentsRes, settingsRes] = await Promise.all([
         fetchUsers(),
         supabase.from('app_templates').select('*').order('created_at', { ascending: false }),
         fetchDeployments(),
         supabase.from('system_settings').select('*').eq('setting_key', 'limit_reached_message').maybeSingle(),
-        supabase.from('system_settings').select('*').eq('setting_key', 'heroku_api_key').maybeSingle(),
       ]);
 
+      if (templatesRes.error) throw templatesRes.error;
+      if (settingsRes.error) throw settingsRes.error;
       if (templatesRes.data) {
         setTemplates(templatesRes.data.map(t => ({
           ...t,
@@ -133,7 +131,6 @@ export default function Admin() {
         })));
       }
       if (settingsRes.data) setSystemMessage(settingsRes.data.setting_value);
-      if (herokuKeyRes.data) setHerokuApiKey(herokuKeyRes.data.setting_value);
     } catch (error) {
       console.error('Error fetching data:', error);
       toast.error('Failed to load admin data');
@@ -143,13 +140,21 @@ export default function Admin() {
   };
 
   const fetchUsers = async () => {
-    const { data: profiles } = await supabase.from('profiles').select('*');
-    const { data: roles } = await supabase.from('user_roles').select('*');
-    const { data: limits } = await supabase.from('deployment_limits').select('*');
-    const { data: deploymentCounts } = await supabase
+    const [profilesRes, rolesRes, limitsRes, deploymentCountsRes] = await Promise.all([
+      supabase.from('profiles').select('*'),
+      supabase.from('user_roles').select('*'),
+      supabase.from('deployment_limits').select('*'),
+      supabase
       .from('deployments')
       .select('user_id, status')
-      .eq('status', 'success');
+      .in('status', ['success', 'pending']),
+    ]);
+    const queryError = [profilesRes.error, rolesRes.error, limitsRes.error, deploymentCountsRes.error].find(Boolean);
+    if (queryError) throw queryError;
+    const { data: profiles } = profilesRes;
+    const { data: roles } = rolesRes;
+    const { data: limits } = limitsRes;
+    const { data: deploymentCounts } = deploymentCountsRes;
 
     if (profiles && roles && limits) {
       const userData = profiles.map((profile) => {
@@ -174,26 +179,36 @@ export default function Admin() {
   };
 
   const fetchDeployments = async () => {
-    const { data } = await supabase
+      const { data: deploymentRows, error } = await supabase
       .from('deployments')
       .select(`
         id,
+          user_id,
+          app_template_id,
         created_at,
-        status,
-        profiles!deployments_user_id_fkey(email),
-        app_templates(name)
+          status,
+          heroku_app_name
       `)
       .order('created_at', { ascending: false })
       .limit(50);
 
-    if (data) {
+    if (error) throw error;
+    if (deploymentRows) {
+      const userIds = [...new Set(deploymentRows.map((row) => row.user_id))];
+      const templateIds = [...new Set(deploymentRows.map((row) => row.app_template_id))];
+      const [profilesRes, templatesRes] = await Promise.all([
+        supabase.from('profiles').select('id, email').in('id', userIds),
+        supabase.from('app_templates').select('id, name').in('id', templateIds),
+      ]);
+      if (profilesRes.error) throw profilesRes.error;
+      if (templatesRes.error) throw templatesRes.error;
       setDeployments(
-        data.map((d: any) => ({
+        deploymentRows.map((d) => ({
           id: d.id,
           created_at: d.created_at,
           status: d.status,
-          user_email: d.profiles?.email || 'Unknown',
-          app_name: d.app_templates?.name || 'Unknown',
+          user_email: profilesRes.data?.find((profile) => profile.id === d.user_id)?.email || 'Unknown',
+          app_name: d.heroku_app_name || templatesRes.data?.find((template) => template.id === d.app_template_id)?.name || 'Unknown',
         }))
       );
     }
@@ -318,82 +333,8 @@ export default function Admin() {
     }
   };
 
-  const handleTestHerokuKey = async () => {
-    const trimmedKey = herokuApiKey.trim();
-    
-    if (!trimmedKey) {
-      toast.error('Please enter a Heroku API key first');
-      return;
-    }
-    
-    setTestingApiKey(true);
-    
-    try {
-      // Test the API key by calling Heroku's account info endpoint
-      const response = await fetch('https://api.heroku.com/account', {
-        method: 'GET',
-        headers: {
-          'Authorization': `Bearer ${trimmedKey}`,
-          'Accept': 'application/vnd.heroku+json; version=3',
-        },
-      });
-      
-      if (response.ok) {
-        const accountData = await response.json();
-        toast.success(`✓ API key is valid! Connected to: ${accountData.email}`);
-      } else if (response.status === 401) {
-        toast.error('Invalid API key. Please check and try again.');
-      } else {
-        toast.error(`Connection failed with status: ${response.status}`);
-      }
-    } catch (error: any) {
-      console.error('Test connection error:', error);
-      toast.error('Failed to test connection: ' + error.message);
-    } finally {
-      setTestingApiKey(false);
-    }
-  };
-
-  const handleUpdateHerokuKey = async () => {
-    try {
-      const trimmedKey = herokuApiKey.trim();
-      
-      // Validate API key format
-      if (!trimmedKey) {
-        toast.error('Please enter a Heroku API key');
-        return;
-      }
-      
-      if (trimmedKey.length < 20) {
-        toast.error('Heroku API key appears to be too short. Please verify it is correct.');
-        return;
-      }
-      
-      // Check for common formatting issues
-      if (trimmedKey.includes(' ') || trimmedKey.includes('\n')) {
-        toast.error('API key contains whitespace. Please check for copy/paste errors.');
-        return;
-      }
-      
-      const { error } = await supabase
-        .from('system_settings')
-        .upsert({ 
-          setting_key: 'heroku_api_key',
-          setting_value: trimmedKey 
-        }, {
-          onConflict: 'setting_key'
-        });
-
-      if (error) throw error;
-
-      toast.success('Heroku API key updated successfully');
-      setHerokuApiKey(trimmedKey); // Update state with trimmed version
-    } catch (error: any) {
-      toast.error(error.message);
-    }
-  };
-
   const handleDeleteTemplate = async (id: string) => {
+    if (!window.confirm('Delete this template? Existing deployment records will be retained.')) return;
     try {
       const { error } = await supabase.from('app_templates').delete().eq('id', id);
       if (error) throw error;
@@ -492,6 +433,12 @@ export default function Admin() {
             </div>
             
             <div className="flex items-center gap-1 sm:gap-2">
+              <Button variant="outline" size="sm" onClick={() => window.location.assign('/dashboard')} className="hidden sm:flex">
+                <Shield className="mr-2 h-4 w-4" /> Apps
+              </Button>
+              <Button variant="outline" size="icon" aria-label="Open app dashboard" title="App dashboard" onClick={() => window.location.assign('/dashboard')} className="sm:hidden">
+                <Shield className="h-4 w-4" />
+              </Button>
               <ThemeToggle />
               <Button 
                 variant="outline" 

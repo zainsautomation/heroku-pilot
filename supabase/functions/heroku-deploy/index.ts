@@ -17,6 +17,12 @@ Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders });
   }
+  if (req.method !== 'POST') {
+    return new Response(JSON.stringify({ error: 'Method not allowed' }), {
+      status: 405,
+      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+    });
+  }
 
   let reservedDeploymentId: string | null = null;
   const serviceClient = createClient(
@@ -49,12 +55,9 @@ Deno.serve(async (req) => {
 
     const herokuApiKey = Deno.env.get('HEROKU_API_KEY');
     
-    // Validate API key format
-    if (!herokuApiKey || herokuApiKey.length < 20) {
-      throw new Error('Configuration error');
+    if (!herokuApiKey || herokuApiKey.trim().length < 20) {
+      throw new Error('Heroku connection is not configured securely yet. Ask an administrator to add the Heroku key in secure project settings.');
     }
-    
-    if (!herokuApiKey) throw new Error('Heroku connection is not configured securely yet.');
 
     if (action === 'create') {
       const { templateId, configVars, appName: customAppName, branch }: DeployRequest = await req.json();
@@ -76,6 +79,15 @@ Deno.serve(async (req) => {
         console.error('Template error:', templateError);
         throw new Error('Template not found');
       }
+
+      const metadata = Array.isArray(template.config_vars_metadata) ? template.config_vars_metadata : [];
+      const allowedVars = new Set(metadata.map((item: { name?: string }) => item?.name).filter(Boolean));
+      const unsupportedVars = Object.keys(configVars).filter((key) => !allowedVars.has(key));
+      if (unsupportedVars.length) throw new Error('App settings include an unsupported variable');
+      const missingRequired = metadata
+        .filter((item: { name?: string; required?: boolean }) => item.required && !String(configVars[item.name || ''] || '').trim())
+        .map((item: { name?: string }) => item.name);
+      if (missingRequired.length) throw new Error(`Required app settings are missing: ${missingRequired.join(', ')}`);
 
       const { data: reservationId, error: reservationError } = await serviceClient.rpc(
         'reserve_deployment',
@@ -118,8 +130,12 @@ Deno.serve(async (req) => {
       }
 
       // Generate app name
-      const baseAppName = customAppName || template.default_app_name || 'app';
-      const appName = `${baseAppName}-${Date.now()}`.toLowerCase().replace(/[^a-z0-9-]/g, '-');
+      const baseAppName = String(customAppName || template.default_app_name || 'app').trim().toLowerCase();
+      if (!/^[a-z0-9][a-z0-9-]{0,15}$/.test(baseAppName)) {
+        throw new Error('App name prefix must be 1–16 lowercase letters, numbers, or hyphens and start with a letter or number.');
+      }
+      const appName = `${baseAppName}-${Date.now()}`;
+      if (appName.length > 30 || appName.endsWith('-')) throw new Error('Generated Heroku app name is invalid');
       console.log('App name:', appName);
 
       // Use App Setups API (same as "Deploy to Heroku" button)
@@ -296,17 +312,42 @@ Deno.serve(async (req) => {
 
       const latestBuild = builds[0];
       if (latestBuild.status === 'succeeded' || latestBuild.status === 'failed') {
+        let buildLogs: string | null = null;
+        if (latestBuild.output_stream_url) {
+          try {
+            const logResponse = await fetch(latestBuild.output_stream_url);
+            if (logResponse.ok) buildLogs = (await logResponse.text()).slice(-30000);
+          } catch {
+            buildLogs = null;
+          }
+        }
         await serviceClient.from('deployments').update({
           status: latestBuild.status === 'succeeded' ? 'success' : 'failed',
           error_message: latestBuild.status === 'failed' ? 'Build failed on Heroku' : null,
+          build_log_url: null,
         }).eq('id', deploymentId);
+        return new Response(JSON.stringify({
+          status: latestBuild.status,
+          buildId: latestBuild.id,
+          logs: buildLogs,
+        }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+      }
+
+      let buildLogs: string | null = null;
+      if (latestBuild.output_stream_url) {
+        try {
+          const logResponse = await fetch(latestBuild.output_stream_url);
+          if (logResponse.ok) buildLogs = (await logResponse.text()).slice(-30000);
+        } catch {
+          buildLogs = null;
+        }
       }
 
       return new Response(
         JSON.stringify({
           status: latestBuild.status,
           buildId: latestBuild.id,
-          buildLogUrl: latestBuild.output_stream_url || null,
+          logs: buildLogs,
         }),
         {
           headers: { ...corsHeaders, 'Content-Type': 'application/json' },
@@ -367,6 +408,36 @@ Deno.serve(async (req) => {
           headers: { ...corsHeaders, 'Content-Type': 'application/json' },
         }
       );
+    } else if (action === 'delete-user') {
+      const { userId } = await req.json();
+      if (typeof userId !== 'string' || !/^[0-9a-f-]{36}$/i.test(userId)) throw new Error('A valid user ID is required');
+      const { data: isAdmin, error: roleError } = await serviceClient.rpc('has_role', { _user_id: user.id, _role: 'admin' });
+      if (roleError || !isAdmin) throw new Error('Only administrators can delete user accounts');
+      if (userId === user.id) throw new Error('You cannot delete your own account here');
+
+      const { data: userDeployments, error: lookupError } = await serviceClient
+        .from('deployments')
+        .select('id, heroku_app_name')
+        .eq('user_id', userId);
+      if (lookupError) throw new Error('Could not verify the user’s deployed apps');
+      for (const deployment of userDeployments || []) {
+        if (!deployment.heroku_app_name) continue;
+        const deleteResponse = await fetch(`https://api.heroku.com/apps/${deployment.heroku_app_name}`, {
+          method: 'DELETE',
+          headers: {
+            'Authorization': `Bearer ${herokuApiKey}`,
+            'Accept': 'application/vnd.heroku+json; version=3',
+          },
+        });
+        if (!deleteResponse.ok && deleteResponse.status !== 404) {
+          throw new Error(`Could not remove hosted app ${deployment.heroku_app_name}; the account was not deleted.`);
+        }
+      }
+      const { error: removeUserError } = await serviceClient.auth.admin.deleteUser(userId);
+      if (removeUserError) throw new Error('Hosted apps were removed, but the account could not be deleted.');
+      return new Response(JSON.stringify({ success: true }), {
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
     }
 
     throw new Error('Invalid action');
