@@ -862,97 +862,22 @@ export default function Admin() {
               </Card>
 
               {(role === 'admin' || role === 'moderator') && (
-                <Card className="shadow-elevated border-destructive">
+                <Card className="shadow-elevated">
                   <CardHeader>
                     <CardTitle>
                       <div className="flex items-center gap-2">
-                        <Key className="h-5 w-5 text-destructive" />
+                        <Key className="h-5 w-5 text-primary" />
                         Heroku API Configuration
                       </div>
                     </CardTitle>
                     <CardDescription>
-                      Set the Heroku API key to enable app deployments
+                      Heroku credentials are managed securely by the deployment service and are not displayed in this dashboard.
                     </CardDescription>
                   </CardHeader>
-                  <CardContent className="space-y-4">
-                    {!herokuApiKey && (
-                      <div className="p-4 border border-destructive bg-destructive/10 rounded-lg">
-                        <p className="text-sm font-medium text-destructive mb-2">⚠️ No Heroku API Key Set</p>
-                        <p className="text-sm text-muted-foreground">
-                          Deployments will fail until you add a valid Heroku API key. Get your API key from{' '}
-                          <a 
-                            href="https://dashboard.heroku.com/account" 
-                            target="_blank" 
-                            rel="noopener noreferrer"
-                            className="underline hover:text-primary"
-                          >
-                            Heroku Account Settings
-                          </a>
-                        </p>
-                      </div>
-                    )}
-                    
-                    <div className="space-y-2">
-                      <Label>Heroku API Key</Label>
-                      <div className="flex gap-2">
-                        <Input
-                          type={showHerokuKey ? "text" : "password"}
-                          value={herokuApiKey}
-                          onChange={(e) => setHerokuApiKey(e.target.value)}
-                          placeholder="Enter Heroku API key"
-                          className={!herokuApiKey ? 'border-destructive' : ''}
-                        />
-                        <Button
-                          variant="outline"
-                          size="icon"
-                          onClick={() => setShowHerokuKey(!showHerokuKey)}
-                        >
-                          {showHerokuKey ? '🙈' : '👁️'}
-                        </Button>
-                      </div>
-                      <div className="space-y-1">
-                        <p className="text-sm text-muted-foreground">
-                          This key will be used to deploy apps via Heroku API
-                        </p>
-                        <p className="text-xs text-muted-foreground">
-                          How to get your API key:
-                        </p>
-                        <ol className="text-xs text-muted-foreground list-decimal list-inside space-y-1 ml-2">
-                          <li>Go to <a href="https://dashboard.heroku.com/account" target="_blank" rel="noopener noreferrer" className="underline">Heroku Account Settings</a></li>
-                          <li>Scroll to "API Key" section</li>
-                          <li>Click "Reveal" to see your API key</li>
-                          <li>Copy and paste it here</li>
-                        </ol>
-                      </div>
-                    </div>
-                    
-                    <div className="flex gap-2">
-                      <Button 
-                        onClick={handleTestHerokuKey} 
-                        disabled={!herokuApiKey || testingApiKey}
-                        variant="outline"
-                        className="flex-1"
-                      >
-                        {testingApiKey ? (
-                          <>
-                            <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                            Testing...
-                          </>
-                        ) : (
-                          <>
-                            <Check className="h-4 w-4 mr-2" />
-                            Test Connection
-                          </>
-                        )}
-                      </Button>
-                      <Button 
-                        onClick={handleUpdateHerokuKey} 
-                        disabled={!herokuApiKey}
-                        className="flex-1"
-                      >
-                        {herokuApiKey ? 'Update' : 'Save'} API Key
-                      </Button>
-                    </div>
+                  <CardContent>
+                    <p className="text-sm text-muted-foreground">
+                      For safety, API keys must stay server-side. They cannot be entered or tested from this page.
+                    </p>
                   </CardContent>
                 </Card>
               )}

@@ -58,7 +58,7 @@ interface Deployment {
 }
 
 export default function Dashboard() {
-  const { user, signOut } = useAuth();
+  const { user, role, signOut } = useAuth();
   const navigate = useNavigate();
   const [templates, setTemplates] = useState<AppTemplate[]>([]);
   const [deployments, setDeployments] = useState<Deployment[]>([]);
