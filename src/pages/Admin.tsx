@@ -7,7 +7,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { toast } from 'sonner';
-import { Rocket, LogOut, Plus, Users, Package, Settings, BarChart, Download, Check, X, Loader2, Trash2, Search, Shield } from 'lucide-react';
+import { Rocket, LogOut, Plus, Users, Package, Settings, BarChart, Download, Check, X, Loader2, Trash2, Search, Shield, Key } from 'lucide-react';
 import { ThemeToggle } from '@/components/ThemeToggle';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { z } from 'zod';
